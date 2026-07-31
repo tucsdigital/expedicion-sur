@@ -1,155 +1,88 @@
-import { collection, getDocs, limit, orderBy as firestoreOrderBy, query, where } from 'firebase/firestore';
-import { db, firebaseEnabled } from '@/lib/firebase';
-import { Paquete, Categoria } from '@/types';
+import type { Metadata } from 'next';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
-import WhatsAppButton from '@/components/WhatsAppButton';
 import PaquetesClient from '@/components/PaquetesClient';
-import type { Metadata } from 'next';
-import { serializeFirestoreData } from '@/lib/utils/serialize';
+import PublicInquiryForm from '@/components/forms/PublicInquiryForm';
+import WhatsAppOfficialIcon from '@/components/WhatsAppOfficialIcon';
+import WhatsAppButton from '@/components/WhatsAppButton';
 import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '@/lib/constants';
-import { siteConfig } from '@/lib/siteConfig';
+import { getPaquetesPageData } from '@/lib/paquetesData';
+import { getWhatsAppLink } from '@/lib/utils/whatsapp';
 
 const siteUrl = SITE_URL;
 
 export const metadata: Metadata = {
-  title: `Excursiones - ${SITE_NAME}`,
-  description: `Explorá nuestras excursiones con ${SITE_NAME}. ${SITE_DESCRIPTION}`,
+  title: `Experiencias y Excursiones - ${SITE_NAME}`,
+  description: `${SITE_DESCRIPTION} Conoce nuestras salidas destacadas y solicita asesoramiento personalizado.`,
   alternates: {
     canonical: `${siteUrl}/paquetes`,
   },
-  openGraph: {
-    type: 'website',
-    url: `${siteUrl}/paquetes`,
-    title: `Excursiones - ${SITE_NAME}`,
-    description: `Explorá nuestras excursiones con ${SITE_NAME}.`,
-    siteName: SITE_NAME,
-    locale: siteConfig.seo.locale,
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: `Excursiones - ${SITE_NAME}`,
-    description: `Explorá nuestras excursiones con ${SITE_NAME}.`,
-  },
-  keywords: [...siteConfig.seo.keywords, 'paquetes', 'paquetes turísticos'],
 };
 
-/** Sin caché: los cambios del admin (paquetes) se ven de inmediato */
-export const revalidate = 0;
-
-type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-async function getPaquetes(): Promise<Paquete[]> {
-  if (!firebaseEnabled) return [];
-  try {
-    const snapshot = await getDocs(
-      query(
-        collection(db, 'paquetes'),
-        where('visible', '==', true),
-        firestoreOrderBy('orden', 'asc')
-      )
-    );
-
-    return snapshot.docs.map((doc) => serializeFirestoreData<Paquete>({ id: doc.id, ...doc.data() }));
-  } catch (error) {
-    // Fallback sin índice compuesto
-    const snapshot = await getDocs(query(collection(db, 'paquetes'), where('visible', '==', true)));
-    return snapshot.docs
-      .map((doc) => serializeFirestoreData<Paquete>({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
-  }
-}
-
-async function getCategorias(): Promise<Categoria[]> {
-  if (!firebaseEnabled) return [];
-  try {
-    const snapshot = await getDocs(
-      query(
-        collection(db, 'categorias'),
-        where('activa', '==', true),
-        firestoreOrderBy('orden', 'asc')
-      )
-    );
-
-    return snapshot.docs.map((doc) => serializeFirestoreData<Categoria>({ id: doc.id, ...doc.data() }));
-  } catch (error) {
-    const snapshot = await getDocs(query(collection(db, 'categorias'), where('activa', '==', true)));
-    return snapshot.docs
-      .map((doc) => serializeFirestoreData<Categoria>({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
-  }
-}
-
-function normalizeParam(value: string | string[] | undefined): string[] {
-  if (!value) return [];
-  const values = Array.isArray(value) ? value : [value];
-  return values
-    .flatMap((v) => String(v).split(','))
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export default async function PaquetesPage({
-  searchParams,
-}: {
-  searchParams?: SearchParams;
-}) {
-  const resolvedSearchParams = (await searchParams) ?? {};
-  const [paquetes, categorias] = await Promise.all([
-    getPaquetes(),
-    getCategorias(),
-  ]);
-
-  const tipos = normalizeParam(resolvedSearchParams.tipo);
-  const tag = normalizeParam(resolvedSearchParams.tag);
-  const transportes = normalizeParam(resolvedSearchParams.transporte);
-
-  let heroTitle = 'Excursiones';
-  let heroSubtitle = 'Descubre los mejores destinos turísticos con excursiones diseñadas para ti';
-
-  if (tipos.includes('grupal')) {
-    heroTitle = 'Salidas grupales';
-    heroSubtitle = 'Viajes organizados para compartir, con todo planificado';
-  } else if (tipos.includes('internacional')) {
-    heroTitle = 'Excursiones internacionales';
-    heroSubtitle = 'Explorá destinos internacionales con propuestas seleccionadas';
-  } else if (tipos.includes('educativo')) {
-    heroTitle = 'Excursiones educativas';
-    heroSubtitle = 'Opciones pensadas para instituciones, contingentes y grupos';
-  } else if (tipos.includes('eventos') || tipos.includes('recitales')) {
-    heroTitle = 'Eventos / Recitales';
-    heroSubtitle = 'Eventos y recitales para compartir con tu grupo';
-  } else if (transportes.length > 0) {
-    heroTitle = 'Excursiones con transporte';
-    heroSubtitle = 'Encontrá excursiones por tipo de transporte';
-  } else if (tag.includes('promo')) {
-    heroTitle = 'Promos';
-    heroSubtitle = 'Ofertas y oportunidades para viajar al mejor precio';
-  } else if (tag.includes('escapada') || tag.includes('religioso')) {
-    heroTitle = 'Eventos / Recitales';
-    heroSubtitle = 'Eventos y recitales para compartir con tu grupo';
-  }
+export default async function PaquetesPage() {
+  const { paquetes, categorias, interestOptions } = await getPaquetesPageData();
 
   return (
     <>
-      <Navbar theme="rio" />
+      <Navbar reserveSpace />
       <WhatsAppButton />
 
-      {/* Hero: fondo cream, texto negro (alineado a la página principal) */}
-      <section className="relative bg-cream text-black pt-24 pb-12 md:pt-32 md:pb-16 border-b border-gray-200">
-        <div className="container mx-auto px-4 md:px-6 lg:px-8">
-          <div className="mx-auto pt-24 text-center md:text-left">
-            <h1 className="text-[40px] leading-[50px] tracking-[1px] font-semibold mb-3 md:mb-4 font-heading text-black">
-              {heroTitle}
+      <main className="bg-[var(--color-cream)] px-4 pb-16 pt-8 md:px-6 lg:px-8">
+        <section className="mx-auto max-w-7xl overflow-hidden rounded-[34px] border border-[rgba(17,17,17,0.06)] bg-neutral-950 px-6 py-10 text-white shadow-[0_24px_70px_rgba(17,17,17,0.16)] md:px-10 md:py-14">
+          <div className="max-w-3xl space-y-5">
+            <span className="rounded-full border border-white/16 bg-white/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-white/84">
+              Catalogo Dinamico
+            </span>
+            <h1 className="text-4xl font-semibold tracking-[-0.06em] md:text-6xl">
+              Todas las experiencias se cargan desde Firestore y quedan listas para vender.
             </h1>
-            <p className="text-base md:text-lg text-gray-700 font-body leading-relaxed">
-              {heroSubtitle}
+            <p className="text-lg leading-8 text-white/74">
+              Explora salidas, filtra por destino o tipo de viaje y lleva la consulta directo a WhatsApp.
+            </p>
+
+            <div className="flex flex-wrap gap-3 text-sm text-white/72">
+              <span className="rounded-full border border-white/12 bg-white/8 px-4 py-2">
+                {paquetes.length} paquetes visibles
+              </span>
+              <span className="rounded-full border border-white/12 bg-white/8 px-4 py-2">
+                {categorias.length} categorias activas
+              </span>
+            </div>
+
+            <a
+              href={getWhatsAppLink('Hola! Quiero recibir asesoramiento sobre las experiencias de Expedicion Sur.')}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[#111111] px-6 text-sm font-semibold text-[#CBBBA0] transition hover:bg-[#E30613] hover:text-[#CBBBA0]"
+            >
+              <WhatsAppOfficialIcon className="h-4 w-4" />
+              Asesoramiento por WhatsApp
+            </a>
+          </div>
+        </section>
+
+        <div className="mx-auto mt-10 max-w-7xl">
+          <PaquetesClient paquetes={paquetes} categorias={categorias} />
+        </div>
+
+        <section className="mx-auto mt-14 grid max-w-7xl gap-8 lg:grid-cols-[0.88fr_1.12fr]">
+          <div className="premium-card p-7 md:p-8">
+            <span className="rounded-full border border-[rgba(17,17,17,0.08)] bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.26em] text-neutral-700">
+              Reserva y Consultas
+            </span>
+            <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-neutral-950">
+              Converti el interes en una conversacion real.
+            </h2>
+            <p className="mt-4 text-base leading-7 text-neutral-650">
+              El formulario toma como opciones los paquetes reales cargados en Firestore para mantener todo alineado con el catalogo vivo.
             </p>
           </div>
-        </div>
-      </section>
 
-      <PaquetesClient paquetes={paquetes} categorias={categorias} />
+          <div className="premium-card p-7 md:p-8">
+            <PublicInquiryForm compact interestOptions={interestOptions} />
+          </div>
+        </section>
+      </main>
 
       <Footer />
     </>

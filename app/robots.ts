@@ -1,6 +1,5 @@
 import { MetadataRoute } from 'next';
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://viaggiotur.vercel.app';
+import { SITE_URL } from '@/lib/constants';
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -8,10 +7,10 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: '*',
         allow: '/',
-        disallow: ['/admin/', '/api/'],
+        disallow: ['/admin/', '/api/', '/vendedor/'],
       },
     ],
-    sitemap: `${siteUrl}/sitemap.xml`,
+    sitemap: `${SITE_URL}/sitemap.xml`,
   };
 }
 

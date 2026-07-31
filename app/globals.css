@@ -1,16 +1,16 @@
 @import 'tailwindcss';
 
 @theme {
-  --sherpa-blue: #000000;
-  --sherpa-green: #000000;
-  --sherpa-green-strong: #000000;
-  --sherpa-yellow: #000000;
-  --sherpa-cream: #FFFFFF;
-  --sherpa-black: #000000;
+  --sherpa-blue: #E30613;
+  --sherpa-green: #CA9E67;
+  --sherpa-green-strong: #8E6B45;
+  --sherpa-yellow: #CBBBA0;
+  --sherpa-cream: #F7F2EA;
+  --sherpa-black: #111111;
   --sherpa-white: #FFFFFF;
-  --sherpa-blue-water: #8FD0B0;
-  --sherpa-green-water: #BCE8A7;
-  --sherpa-yellow-water: #D3F2C3;
+  --sherpa-blue-water: #F7DFE1;
+  --sherpa-green-water: #E5D3BC;
+  --sherpa-yellow-water: #F1E7D8;
 
   --color-primary: var(--sherpa-blue);
   --color-secondary: var(--sherpa-yellow);
@@ -35,10 +35,10 @@
   --gray-950: #030712;
 
   /* Tipografías */
-  --font-heading: var(--font-sora), system-ui, sans-serif;
-  --font-body: var(--font-inter), system-ui, sans-serif;
-  --font-subtitle: var(--font-plus-jakarta), system-ui, sans-serif;
-  --font-accent: var(--font-sora), system-ui, sans-serif;
+  --font-heading: var(--font-brand-heading), "Avenir Next", system-ui, sans-serif;
+  --font-body: var(--font-manrope), system-ui, sans-serif;
+  --font-subtitle: var(--font-manrope), system-ui, sans-serif;
+  --font-accent: var(--font-berkshire-swash), cursive;
 
   /* Extensión de utilidades de fuentes */
   --font-sans: var(--font-body);
@@ -73,6 +73,10 @@
     background-color: var(--sherpa-cream);
     color: var(--sherpa-black);
     font-weight: 400;
+    background-image:
+      radial-gradient(circle at top left, rgba(227, 6, 19, 0.08), transparent 32%),
+      radial-gradient(circle at top right, rgba(202, 158, 103, 0.12), transparent 28%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(247, 242, 234, 0.98));
   }
 
   /* Evitar flash crema en áreas Admin/Vendedor: fondo neutro al detectar su scope */
@@ -81,7 +85,6 @@
     background-color: #ffffff;
   }
 
-  /* Tipografía - Headings con Space Grotesk */
   h1, h2, h3, h4, h5, h6 {
     @apply font-heading font-semibold;
     letter-spacing: -0.02em;
@@ -106,9 +109,8 @@
     line-height: 1.4;
   }
 
-  /* Texto general con Manrope */
   p {
-    @apply text-base md:text-lg;
+    @apply text-base;
     font-weight: 400;
     line-height: 1.6;
   }
@@ -122,7 +124,7 @@
   /* Navegación */
   nav a {
     @apply text-base font-medium tracking-wide;
-    color: var(--sherpa-blue);
+    color: inherit;
   }
 }
 
@@ -242,6 +244,75 @@ body {
     display: none;
   }
 
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .accent-script {
+    font-family: var(--font-accent);
+    line-height: 1;
+  }
+
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(17, 17, 17, 0.08);
+    box-shadow: 0 24px 70px rgba(17, 17, 17, 0.08);
+    backdrop-filter: blur(24px);
+  }
+
+  .section-shell {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.66)),
+      radial-gradient(circle at top right, rgba(227, 6, 19, 0.08), transparent 28%);
+    border: 1px solid rgba(17, 17, 17, 0.06);
+    box-shadow: 0 18px 60px rgba(17, 17, 17, 0.05);
+  }
+
+  .premium-card {
+    border-radius: 28px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(17, 17, 17, 0.06);
+    box-shadow: 0 18px 45px rgba(17, 17, 17, 0.06);
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  }
+
+  .premium-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(227, 6, 19, 0.18);
+    box-shadow: 0 22px 55px rgba(17, 17, 17, 0.08);
+  }
+
+  .hero-overlay {
+    background:
+      linear-gradient(180deg, rgba(17, 17, 17, 0.15), rgba(17, 17, 17, 0.6)),
+      radial-gradient(circle at 20% 20%, rgba(227, 6, 19, 0.16), transparent 28%),
+      radial-gradient(circle at 82% 18%, rgba(203, 187, 160, 0.22), transparent 22%);
+  }
+
+  .ambient-orb {
+    position: absolute;
+    z-index: -1;
+    height: 260px;
+    width: 260px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(227, 6, 19, 0.18), transparent 70%);
+    filter: blur(10px);
+    pointer-events: none;
+  }
+
+  .ambient-orb-secondary {
+    background: radial-gradient(circle, rgba(202, 158, 103, 0.2), transparent 70%);
+  }
+
+  .soft-grid {
+    background-image:
+      linear-gradient(rgba(17, 17, 17, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(17, 17, 17, 0.03) 1px, transparent 1px);
+    background-size: 32px 32px;
+    padding: 4px;
+    border-radius: 34px;
+  }
+
   /* Custom scrollbar para admin */
   .custom-scrollbar::-webkit-scrollbar {
     width: 8px;
@@ -340,7 +411,7 @@ body {
   z-index: 3;
 }
 
-/* Hero gradient Sherpa / Río: azul y amarillo */
+/* Hero gradient de marca */
 .gradient-sherpa {
   background: linear-gradient(
     180deg,
@@ -866,4 +937,80 @@ body {
   height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
+}
+
+@media (max-width: 767px) {
+  .home-mobile-compact h1 {
+    font-size: clamp(1.6rem, 7vw, 2.05rem) !important;
+    line-height: 1.04 !important;
+    letter-spacing: -0.04em !important;
+  }
+
+  .home-mobile-compact h2 {
+    font-size: clamp(1.32rem, 5.8vw, 1.72rem) !important;
+    line-height: 1.08 !important;
+    letter-spacing: -0.035em !important;
+  }
+
+  .home-mobile-compact h3 {
+    font-size: clamp(0.98rem, 4.3vw, 1.14rem) !important;
+    line-height: 1.2 !important;
+    letter-spacing: -0.02em !important;
+  }
+
+  .home-mobile-compact p,
+  .home-mobile-compact li {
+    font-size: 0.8125rem !important;
+    line-height: 1.58 !important;
+  }
+
+  .home-mobile-compact label,
+  .home-mobile-compact small {
+    font-size: 0.72rem !important;
+    line-height: 1.4 !important;
+  }
+
+  .home-mobile-compact input,
+  .home-mobile-compact select,
+  .home-mobile-compact textarea,
+  .home-mobile-compact button {
+    font-size: 0.8125rem !important;
+    line-height: 1.3 !important;
+  }
+
+  .home-mobile-compact a {
+    font-size: inherit !important;
+  }
+
+  .home-mobile-compact .badge-pluma {
+    font-size: 0.82rem !important;
+    line-height: 1.2 !important;
+    letter-spacing: 0.01em !important;
+  }
+
+  .home-mobile-compact .accent-script {
+    font-size: 1rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .home-mobile-compact [class*='text-xl'],
+  .home-mobile-compact [class*='text-2xl'],
+  .home-mobile-compact [class*='text-3xl'],
+  .home-mobile-compact [class*='text-4xl'],
+  .home-mobile-compact [class*='text-5xl'] {
+    font-size: clamp(1.15rem, 5vw, 1.48rem) !important;
+    line-height: 1.14 !important;
+  }
+
+  .home-mobile-compact [class*='text-lg'] {
+    font-size: 0.94rem !important;
+    line-height: 1.34 !important;
+  }
+
+  .home-mobile-compact [class*='text-base'],
+  .home-mobile-compact [class*='text-sm'],
+  .home-mobile-compact [class*='text-xs'] {
+    font-size: 0.78rem !important;
+    line-height: 1.46 !important;
+  }
 }

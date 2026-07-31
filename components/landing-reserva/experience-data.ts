@@ -1,13 +1,13 @@
 import type { Experience } from './types';
 
 export const experience: Experience = {
-  id: 'exp-viaggio-tur',
-  slug: 'viaggio-tur',
-  title: 'VIAGGIO TUR',
-  subtitle: 'Más que un viaje, una experiencia que se comparte.',
-  supportText: 'Salidas grupales, paquetes a medida y atención personalizada para que concretes el viaje que soñás.',
-  topNoticeText: 'Salidas grupales en bus · Excursiones nacionales e internacionales',
-  videoOverlayText: 'Consultá disponibilidad y propuestas · Viaggio Tur',
+  id: 'exp-expedicion-sur',
+  slug: 'expedicion-sur',
+  title: 'EXPEDICION SUR',
+  subtitle: 'Patagonia autentica, atencion personalizada y experiencias memorables.',
+  supportText: 'Excursiones, paquetes a medida y acompanamiento local para descubrir el sur argentino con confianza.',
+  topNoticeText: 'Excursiones, paquetes y asesoramiento personalizado en Patagonia',
+  videoOverlayText: 'Consultá disponibilidad y propuestas · Expedición Sur',
   videoUrl: '/video/video.mp4',
   tiktokVideoId: undefined,
   images: ['/images/1.webp', '/images/2.jpg', '/images/3.jpg', '/images/4.avif', '/images/5.jpg'],
@@ -38,9 +38,9 @@ export const experience: Experience = {
   ],
   testimonials: [
     {
-      name: 'Equipo Viaggio Tur',
-      quote: 'Nos apasiona crear itinerarios atractivos y experiencias inolvidables para cada viajero.',
-      role: 'Tandil, Buenos Aires',
+      name: 'Equipo Expedición Sur',
+      quote: 'Diseñamos experiencias auténticas para que cada viajero viva la Patagonia con confianza y emoción.',
+      role: 'El Calafate, Santa Cruz',
     },
   ],
   dividerPhrase: 'Más que un viaje, una experiencia que se comparte.',

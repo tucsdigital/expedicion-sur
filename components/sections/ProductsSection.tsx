@@ -62,26 +62,26 @@ export default function ProductsSection({
   if (!showSkeletons && !hasProductos) return null;
 
   return (
-    <section id="productos" className="py-6 md:py-10 bg-transparent overflow-x-hidden">
-      <div className="container mx-auto px-4 md:px-6 lg:px-8">
+    <section id="paquetes" className="overflow-x-hidden bg-transparent py-5 md:py-10">
+      <div id="productos" className="container mx-auto px-4 md:px-6 lg:px-8">
         <motion.div
-          className={`max-w-3xl ${filterType === 'paquete' ? 'pb-3 md:pb-4' : ''}`}
+          className={`max-w-3xl ${filterType === 'paquete' ? 'pb-2 md:pb-4' : ''}`}
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-150px" }}
           variants={staggerFastVariants}
           transition={{ staggerChildren: 0.18, delayChildren: 0.22 }}
         >
-          <motion.div className="inline-block mb-3" variants={fadeInDownVariants}>
+          <motion.div className="mb-2 inline-block md:mb-3" variants={fadeInDownVariants}>
             <span className="badge-pluma pluma-underline block">{sectionTitle}</span>
           </motion.div>
           <motion.h2
-            className="text-lg md:text-lg lg:text-lg font-bold leading-tight overflow-hidden"
+            className="overflow-hidden text-[15px] font-bold leading-tight md:text-lg lg:text-lg"
             variants={fadeInRightVariants}
           >
           </motion.h2>
           <motion.p
-            className="text-sm md:text-sm text-[#4B5563] leading-relaxed overflow-hidden"
+            className="overflow-hidden text-[12px] leading-relaxed text-[#4B5563] md:text-sm"
             variants={fadeInUpVariants}
           >
             <motion.span className="block" variants={lineRevealVariants}>
@@ -93,7 +93,7 @@ export default function ProductsSection({
         <motion.div
           variants={fadeInScaleVariants}
           transition={{ duration: 0.75 }}
-          className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"
+          className="grid grid-cols-2 gap-3.5 md:grid-cols-2 md:gap-6 lg:grid-cols-4"
         >
           {showSkeletons
             ? Array.from({ length: SKELETON_COUNT }).map((_, i) => (

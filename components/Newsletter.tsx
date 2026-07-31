@@ -82,16 +82,16 @@ export default function Newsletter() {
   };
 
   return (
-    <section className="pt-4 pb-12 md:py-20 bg-transparent overflow-x-hidden">
+    <section id="newsletter" className="overflow-x-hidden bg-transparent pb-10 pt-3 md:py-20">
       <div className="container mx-auto px-4 md:px-6 lg:px-8">
         <motion.div 
-          className="relative overflow-hidden rounded-3xl bg-primary text-white px-6 py-10 md:px-10 md:py-12"
+          className="relative overflow-hidden rounded-[26px] bg-primary px-4 py-6 text-white md:rounded-3xl md:px-10 md:py-12"
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-150px" }}
           variants={containerVariants}
         >
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+          <div className="relative z-10 grid grid-cols-1 items-center gap-5 lg:grid-cols-2 lg:gap-12">
             {/* Lado izquierdo - Texto con animación */}
             <motion.div 
               className="text-center lg:text-left"
@@ -100,13 +100,13 @@ export default function Newsletter() {
               {!submitted ? (
                 <>
                   <motion.h2 
-                    className="text-lg md:text-lg lg:text-lg font-bold text-white mb-3 leading-tight"
+                    className="mb-2 text-[15px] font-bold leading-tight text-white md:text-lg lg:text-lg"
                     variants={fadeInVariants}
                   >
                     Mantenete informado sobre nuestras últimas ofertas
                   </motion.h2>
                   <motion.p 
-                    className="text-sm md:text-sm text-white/80"
+                    className="text-[12px] text-white/80 md:text-sm"
                     variants={fadeInVariants}
                   >
                     Recibí novedades y promociones exclusivas
@@ -114,17 +114,17 @@ export default function Newsletter() {
                 </>
               ) : (
                 <motion.div 
-                  className="flex flex-col lg:flex-row items-center lg:items-start gap-4"
+                  className="flex flex-col items-center gap-3 lg:flex-row lg:items-start"
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ duration: 0.5 }}
                 >
-                  <div className="inline-flex items-center justify-center w-16 h-16 bg-white/10 rounded-full flex-shrink-0">
-                    <CheckCircle className="h-8 w-8 text-white" />
+                  <div className="inline-flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-white/10 md:h-16 md:w-16">
+                    <CheckCircle className="h-6 w-6 text-white md:h-8 md:w-8" />
                   </div>
                   <div className="text-center lg:text-left">
-                    <p className="text-lg md:text-lg lg:text-lg font-bold text-white mb-2">¡Gracias por suscribirte!</p>
-                    <p className="text-base md:text-lg text-gray-400">Te mantendremos informado sobre nuestras mejores ofertas.</p>
+                    <p className="mb-1.5 text-[15px] font-bold text-white md:text-lg lg:text-lg">¡Gracias por suscribirte!</p>
+                    <p className="text-[12px] text-gray-200 md:text-lg">Te mantendremos informado sobre nuestras mejores ofertas.</p>
                   </div>
                 </motion.div>
               )}
@@ -133,7 +133,7 @@ export default function Newsletter() {
             {/* Lado derecho - Formulario con animación */}
             {!submitted && (
               <motion.div variants={fadeInVariants}>
-                <form onSubmit={handleSubmit} className="space-y-3">
+                <form onSubmit={handleSubmit} className="space-y-2.5 md:space-y-3">
                   <motion.div 
                     className="relative"
                     whileHover={{ scale: 1.01 }}
@@ -149,7 +149,7 @@ export default function Newsletter() {
                       placeholder="Ingresa tu dirección de correo electrónico"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="h-12 bg-white text-gray-900 border-0 rounded-xl text-sm pl-12 placeholder:text-gray-400 focus:ring-2 focus:ring-white shadow-lg transition-all duration-300"
+                      className="h-11 rounded-xl border-0 bg-white pl-11 text-[12px] text-gray-900 shadow-lg transition-all duration-300 placeholder:text-[12px] placeholder:text-gray-400 focus:ring-2 focus:ring-white md:h-12 md:pl-12 md:text-sm md:placeholder:text-sm"
                       disabled={loading}
                     />
                   </motion.div>
@@ -162,7 +162,7 @@ export default function Newsletter() {
                     <Button
                       type="submit"
                       disabled={loading}
-                      className="w-full h-12 bg-secondary text-white font-bold text-sm rounded-xl shadow-lg transition-all duration-300 hover:bg-secondary/90 hover:scale-[1.02]"
+                      className="h-11 w-full rounded-xl bg-secondary text-[12px] font-bold text-black shadow-lg transition-all duration-300 hover:scale-[1.02] hover:bg-secondary/90 md:h-12 md:text-sm"
                     >
                       {loading ? (
                         <>
@@ -176,7 +176,7 @@ export default function Newsletter() {
                   </motion.div>
                   
                   {/* Disclaimer */}
-                  <p className="text-xs text-white/60 text-center">
+                  <p className="text-[10px] text-center text-white/60 md:text-xs">
                     No compartimos tu información. Podés desuscribirte en cualquier momento.
                   </p>
                 </form>

@@ -45,7 +45,7 @@ export default function CategoriaCard({ categoria, index = 0 }: CategoriaCardPro
       }}
     >
       <Link href={`/categoria/${categoria.slug}`} className="block">
-        <Card className="group relative flex h-full min-h-[170px] flex-col gap-0 overflow-hidden rounded-xl border-0 bg-[#101828] py-0 shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg mx-auto aspect-4/3">
+        <Card className="group relative mx-auto flex h-full min-h-[152px] flex-col gap-0 overflow-hidden rounded-xl border-0 bg-[#101828] py-0 shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg aspect-4/3 md:min-h-[170px]">
           {/* Imagen de fondo a pantalla completa */}
           <div className="absolute inset-0">
             <Image
@@ -68,20 +68,20 @@ export default function CategoriaCard({ categoria, index = 0 }: CategoriaCardPro
 
           {/* Contenido sobre la imagen */}
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-            <CardContent className="mt-auto p-3">
-              <h3 className="font-heading text-xs font-bold text-white transition-colors group-hover:text-white/90 truncate">
+            <CardContent className="mt-auto p-2.5 md:p-3">
+              <h3 className="truncate font-heading text-[11px] font-bold text-white transition-colors group-hover:text-white/90 md:text-xs">
                 {categoria.nombre}
               </h3>
-              <p className="mt-0.5 text-[10px] text-white/80 line-clamp-2 md:text-xs">
+              <p className="mt-0.5 line-clamp-2 text-[9px] text-white/80 md:text-xs">
                 {categoria.descripcion}
               </p>
             </CardContent>
 
             {/* Pie: botón Ver más */}
-            <CardFooter className="flex items-center justify-end p-3 pt-0">
+            <CardFooter className="flex items-center justify-end p-2.5 pt-0 md:p-3 md:pt-0">
               <Button
                 size="sm"
-                className="bg-white text-[#0f172a] hover:bg-gray-100 font-semibold transition-transform hover:translate-x-1 shrink-0 text-xs h-8 px-2 md:px-3"
+                className="h-7 shrink-0 bg-white px-2 text-[10px] font-semibold text-[#0f172a] transition-transform hover:translate-x-1 hover:bg-gray-100 md:h-8 md:px-3 md:text-xs"
               >
                 <span className="hidden sm:inline">Ver más</span>
                 <ArrowRight className="h-3 w-3 sm:ml-1 shrink-0" />

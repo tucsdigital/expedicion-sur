@@ -64,7 +64,7 @@ export default function ExperienceCard({ experience: exp, index = 0 }: Experienc
       viewport={{ once: true, margin: '-120px' }}
     >
       <Link href={`/experiencias/${exp.slug}`} className="block">
-        <Card className="group overflow-hidden transition-all duration-300 w-full max-w-sm mx-auto flex flex-col py-0 gap-0 rounded-2xl border-0 shadow-lg cursor-pointer hover:shadow-2xl hover:-translate-y-1 relative aspect-4/5 md:aspect-4/5 min-h-[340px]">
+        <Card className="group relative mx-auto flex w-full max-w-sm cursor-pointer flex-col gap-0 overflow-hidden rounded-2xl border-0 py-0 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl aspect-4/5 min-h-[300px] md:aspect-4/5 md:min-h-[340px]">
           <div className="absolute inset-0">
             <Image
               src={exp.cardImage ?? exp.images?.[0] ?? '/images/hero-placeholder.svg'}
@@ -81,44 +81,44 @@ export default function ExperienceCard({ experience: exp, index = 0 }: Experienc
             <div className="absolute inset-x-0 bottom-0 h-20 bg-black/90" />
           </div>
 
-          <div className="relative z-2 flex items-start justify-between p-3">
-            <Badge className="bg-secondary text-success-strong backdrop-blur-sm hover:bg-secondary text-[10px] md:text-sm px-2 py-0.5">
+          <div className="relative z-2 flex items-start justify-between p-2.5 md:p-3">
+            <Badge className="bg-secondary px-2 py-0.5 text-[9px] text-black backdrop-blur-sm hover:bg-secondary md:text-sm">
               Experiencia
             </Badge>
             <button
               onClick={handleShare}
-              className="cursor-pointer bg-secondary text-success-strong p-2 md:p-3 rounded-full transition-all hover:scale-110 shadow-lg hover:bg-secondary"
+              className="cursor-pointer rounded-full bg-secondary p-1.5 text-black shadow-lg transition-all hover:scale-110 hover:bg-secondary md:p-3"
               title="Compartir experiencia"
             >
-              <Share2 className="h-4 w-4 md:h-5 md:w-5" />
+              <Share2 className="h-3.5 w-3.5 md:h-5 md:w-5" />
             </button>
           </div>
 
-          <CardContent className="relative z-2 mt-auto p-4">
+          <CardContent className="relative z-2 mt-auto p-3 md:p-4">
             <div className="absolute inset-0 bg-linear-to-b from-black/10 via-black/60 to-black/90" />
             <div className="relative drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]">
-              <div className="flex items-center text-[10px] md:text-sm text-gray-400 mb-1">
-                <MapPin className="h-3 w-3 md:h-3.5 md:w-3.5 mr-1 md:mr-1.5 text-white" />
+              <div className="mb-1 flex items-center text-[9px] text-gray-400 md:text-sm">
+                <MapPin className="mr-1 h-3 w-3 text-white md:mr-1.5 md:h-3.5 md:w-3.5" />
                 <span className="text-white font-medium">
                   {exp.title.includes(' en ') ? exp.title.split(' en ').slice(1).join(' ') : exp.title.split(' ').slice(-2).join(' ') || 'Experiencia'}
                 </span>
               </div>
-              <h3 className="text-xs md:text-sm lg:text-sm font-heading font-bold mb-1.5 md:mb-2 text-white group-hover:text-white/90 transition-colors">
+              <h3 className="mb-1.5 text-[11px] font-heading font-bold text-white transition-colors group-hover:text-white/90 md:mb-2 md:text-sm lg:text-sm">
                 {exp.title}
               </h3>
-              <p className="text-[10px] md:text-sm text-white/80 font-body mb-2 md:mb-3 line-clamp-3">
+              <p className="mb-2 line-clamp-3 text-[9px] font-body text-white/80 md:mb-3 md:text-sm">
                 {exp.subtitle || exp.supportText || ''}
               </p>
 
               {features.length > 0 && (
-                <div className="flex gap-1 flex-wrap mb-2">
+                <div className="mb-2 flex flex-wrap gap-1">
                   {features.map((feature, idx) => (
                     <div
                       key={idx}
-                      className="group/feature relative flex items-center justify-center w-6 h-6 md:w-7 md:h-7 bg-white/15 text-white rounded-md backdrop-blur-sm"
+                      className="group/feature relative flex h-5 w-5 items-center justify-center rounded-md bg-white/15 text-white backdrop-blur-sm md:h-7 md:w-7"
                       aria-label={feature.label}
                     >
-                      <span className="text-white text-sm md:text-lg">{feature.icon}</span>
+                      <span className="text-xs text-white md:text-lg">{feature.icon}</span>
                       <span
                         role="tooltip"
                         className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-full bg-black/90 px-3 py-1 text-xs font-semibold text-white shadow-lg opacity-0 transition-opacity duration-200 group-hover/feature:opacity-100"
@@ -131,31 +131,31 @@ export default function ExperienceCard({ experience: exp, index = 0 }: Experienc
                 </div>
               )}
 
-              <div className="flex items-center text-[10px] md:text-sm text-gray-400">
-                <Clock className="h-3 w-3 md:h-3.5 md:w-3.5 mr-1 md:mr-1.5 text-white" />
+              <div className="flex items-center text-[9px] text-gray-400 md:text-sm">
+                <Clock className="mr-1 h-3 w-3 text-white md:mr-1.5 md:h-3.5 md:w-3.5" />
                 <span className="text-white font-medium">Reservá tu fecha</span>
               </div>
             </div>
           </CardContent>
 
-          <CardFooter className="relative z-2 p-4 pt-2 flex items-center justify-between">
+          <CardFooter className="relative z-2 flex items-center justify-between p-3 pt-1.5 md:p-4 md:pt-2">
             <div>
               {hasPrice ? (
                 <>
-                  <p className="text-[10px] md:text-xs text-gray-400 font-body">Desde</p>
-                  <p className="text-xs md:text-sm font-heading font-bold text-white">
+                  <p className="text-[9px] font-body text-gray-400 md:text-xs">Desde</p>
+                  <p className="text-[11px] font-heading font-bold text-white md:text-sm">
                     ARS ${Number(exp.price).toLocaleString('es-AR')}
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-[10px] md:text-xs text-gray-400 font-body">Consultar</p>
-                  <p className="text-xs md:text-sm font-heading font-bold text-white">Consultá con Viaggio Tur</p>
+                  <p className="text-[9px] font-body text-gray-400 md:text-xs">Consultar</p>
+                  <p className="text-[11px] font-heading font-bold text-white md:text-sm">Consultá con Expedición Sur</p>
                 </>
               )}
             </div>
             <Button
-              className="group bg-secondary text-success-strong font-semibold hover:bg-secondary h-8 w-8 p-0 md:h-9 md:w-auto md:px-4"
+              className="group h-8 w-8 bg-secondary p-0 text-black hover:bg-secondary md:h-9 md:w-auto md:px-4"
               aria-label="Ver más"
             >
               <span className="hidden md:inline">Ver más</span>

@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 
 const apiKey = process.env.RESEND_API_KEY;
 const fromEnv = process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev';
-const brandName = process.env.BRAND_NAME ?? 'VIAGGIO TUR';
+const brandName = process.env.BRAND_NAME ?? 'Expedicion Sur';
 
 export const resend = apiKey ? new Resend(apiKey) : null;
 

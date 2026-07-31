@@ -5,7 +5,7 @@
 
 import { CONTACT_INFO } from '@/lib/constants';
 
-const SITE_NAME = 'VIAGGIO TUR';
+const SITE_NAME = 'Expedición Sur';
 
 type ReservaEmailData = {
   customerName: string;

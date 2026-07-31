@@ -40,29 +40,29 @@ export default function ExperienciasSection({
   };
 
   return (
-    <section id="experiencias" className="py-8 md:py-12 bg-transparent overflow-x-hidden">
+    <section id="experiencias" className="overflow-x-hidden bg-transparent py-6 md:py-12">
       <div className="container mx-auto px-4 md:px-6 lg:px-8">
         <motion.div
-          className="max-w-3xl pb-4 md:pb-6"
+          className="max-w-3xl pb-3 md:pb-6"
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: '-150px' }}
           variants={staggerFastVariants}
           transition={{ staggerChildren: 0.18, delayChildren: 0.22 }}
         >
-          <motion.div className="inline-block mb-4" variants={fadeInDownVariants}>
+          <motion.div className="mb-2 inline-block md:mb-4" variants={fadeInDownVariants}>
             <span className="badge-pluma pluma-underline block">Experiencias</span>
           </motion.div>
           <motion.h2
-            className="text-lg md:text-lg lg:text-lg font-bold leading-tight overflow-hidden"
+            className="overflow-hidden text-[15px] font-bold leading-tight md:text-lg lg:text-lg"
             variants={fadeInRightVariants}
           >
             <motion.span className="block" variants={lineRevealVariants}>
-              Viví cada destino con Viaggio Tur
+              Viví cada destino con Expedición Sur
             </motion.span>
           </motion.h2>
           <motion.p
-            className="text-sm md:text-sm text-[#4B5563] leading-relaxed overflow-hidden"
+            className="overflow-hidden text-[12px] leading-relaxed text-[#4B5563] md:text-sm"
             variants={fadeInUpVariants}
           >
             <motion.span className="block" variants={lineRevealVariants}>
@@ -74,7 +74,7 @@ export default function ExperienciasSection({
         <motion.div
           variants={fadeInScaleVariants}
           transition={{ duration: 0.75 }}
-          className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8"
+          className="grid grid-cols-2 gap-3.5 md:grid-cols-2 md:gap-8 lg:grid-cols-4"
         >
           {showSkeletons
             ? Array.from({ length: SKELETON_COUNT }).map((_, i) => (

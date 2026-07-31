@@ -35,7 +35,7 @@ export default function ServicesSection({
   }, []);
 
   return (
-    <section className="relative py-16 md:py-24 bg-[#F9FAFB] overflow-hidden">
+    <section className="relative overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.18)_0%,rgba(244,238,231,0.2)_100%)] py-16 md:py-24">
       {/* Background Orbs */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div className="absolute top-0 left-[-10%] w-[400px] h-[400px] bg-secondary/5 rounded-full blur-[100px] opacity-60" />
@@ -43,19 +43,19 @@ export default function ServicesSection({
 
       <div className="container mx-auto px-4 md:px-6 lg:px-8 relative z-10">
         <motion.div
-          className="mb-12 md:mb-16 max-w-3xl mx-auto text-center"
+          className="mx-auto mb-10 max-w-3xl text-center md:mb-16"
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-150px" }}
           variants={staggerFastVariants}
         >
           <motion.div className="inline-block mb-6" variants={fadeInUpVariants}>
-            <span className="inline-block py-1.5 px-4 rounded-full bg-primary/10 text-primary text-xs md:text-sm font-bold tracking-widest uppercase shadow-[0_2px_10px_rgba(76,175,80,0.1)]">
+            <span className="inline-block rounded-full bg-primary/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-primary shadow-[0_2px_10px_rgba(76,175,80,0.1)] md:px-4 md:py-1.5 md:text-sm">
               {section.badge}
             </span>
           </motion.div>
           <motion.h2
-            className="text-3xl md:text-5xl font-extrabold text-gray-900 mb-6 tracking-tight leading-[1.1]"
+            className="mb-4 text-[1.55rem] font-extrabold leading-[1.08] tracking-tight text-gray-900 md:mb-6 md:text-5xl"
             variants={fadeInUpVariants}
           >
             {section.titlePrefix}{' '}
@@ -67,7 +67,7 @@ export default function ServicesSection({
             </span>
           </motion.h2>
           <motion.p
-            className="text-lg md:text-xl text-gray-500 font-light leading-relaxed max-w-2xl mx-auto"
+            className="mx-auto max-w-2xl text-sm font-light leading-relaxed text-gray-500 md:text-xl"
             variants={fadeInUpVariants}
           >
             {section.subtitle}
@@ -83,16 +83,16 @@ export default function ServicesSection({
             {services.map((item, index) => {
               const Icon = ICONS[item.icon as keyof typeof ICONS] || Users;
               return (
-                <div key={index} className="shrink-0 w-[85vw] snap-center">
-                  <div className="relative h-full bg-white border border-gray-100/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-3xl p-8 transition-all duration-500 overflow-hidden">
+                <div key={index} className="w-[82vw] shrink-0 snap-center">
+                  <div className="relative h-full overflow-hidden rounded-3xl border border-gray-100/50 bg-white p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500">
                     <div className="relative z-10">
-                      <div className="inline-flex items-center justify-center w-14 h-14 bg-primary/10 text-primary rounded-2xl mb-6">
-                        <Icon className="h-7 w-7" />
+                      <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <Icon className="h-5 w-5" />
                       </div>
-                      <h3 className="text-xl font-bold mb-4 text-gray-900">
+                      <h3 className="mb-2 text-base font-bold text-gray-900">
                         {item.title}
                       </h3>
-                      <p className="text-gray-500 leading-relaxed font-light">
+                      <p className="text-[12px] font-light leading-6 text-gray-500">
                         {item.desc}
                       </p>
                     </div>
@@ -124,7 +124,7 @@ export default function ServicesSection({
             const Icon = ICONS[item.icon as keyof typeof ICONS] || Users;
             return (
               <motion.div key={index} className="group relative" variants={scaleInVariants}>
-                <div className="relative h-full bg-white border border-gray-100/50 rounded-3xl p-8 hover:border-primary/20 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-2 transition-all duration-500 overflow-hidden">
+                <div className="relative h-full overflow-hidden rounded-3xl border border-gray-100/50 bg-white p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500 hover:-translate-y-2 hover:border-primary/20 hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)]">
                   <div className="relative z-10">
                     <motion.div
                       className="inline-flex items-center justify-center w-14 h-14 bg-primary/10 text-primary rounded-2xl mb-6 group-hover:bg-primary group-hover:text-white transition-colors duration-500"

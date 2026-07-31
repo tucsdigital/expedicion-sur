@@ -74,7 +74,7 @@ export default function BlogCard({ post, index = 0 }: BlogCardProps) {
           <div className="mt-3 md:mt-4 text-[11px] md:text-xs text-white/70 flex items-center gap-2">
             <span>{dateLabel}</span>
             <span className="text-white/40">•</span>
-            <span>VIAGGIO TUR</span>
+            <span>EXPEDICION SUR</span>
           </div>
         </div>
       </Link>

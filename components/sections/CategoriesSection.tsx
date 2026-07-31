@@ -20,20 +20,23 @@ export default function CategoriesSection({
   const [showAllCategorias, setShowAllCategorias] = useState(false);
 
   return (
-    <section id="categorias" className="py-10 md:py-16 bg-[#F9FAFB] overflow-x-hidden">
-      <div className="container mx-auto px-4 md:px-6 lg:px-8">
+    <section
+      id="destinos"
+      className="overflow-x-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.16)_0%,rgba(247,243,237,0.12)_100%)] py-7 md:py-16"
+    >
+      <div id="categorias" className="container mx-auto px-4 md:px-6 lg:px-8">
         <motion.div
-          className="mb-16 md:mb-20 max-w-3xl"
+          className="mb-8 max-w-3xl md:mb-20"
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-150px" }}
           variants={staggerFastVariants}
         >
-          <motion.div className="inline-block mb-4" variants={fadeInUpVariants}>
+          <motion.div className="mb-2 inline-block md:mb-4" variants={fadeInUpVariants}>
             <span className="badge-pluma pluma-underline">Nuestros Destinos</span>
           </motion.div>
           <motion.p
-            className="text-base md:text-lg text-[#4B5563] leading-relaxed"
+            className="text-[12px] leading-relaxed text-[#4B5563] md:text-lg"
             variants={fadeInUpVariants}
           >
             Explorá nuestras categorías y encontrá el viaje perfecto para vos
@@ -59,8 +62,8 @@ export default function CategoriesSection({
           )}
         </div>
 
-        <div className="md:hidden space-y-6">
-          <div className="grid grid-cols-1 gap-6">
+        <div className="space-y-4 md:hidden">
+          <div className="grid grid-cols-1 gap-4">
             {categorias.length > 0 ? (
               categorias
                 .slice(0, showAllCategorias ? categorias.length : 3)
@@ -69,12 +72,12 @@ export default function CategoriesSection({
                 ))
             ) : (
               <motion.div
-                className="text-center py-20"
+              className="py-14 text-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.6 }}
               >
-                <p className="text-base md:text-lg text-gray-400">
+                <p className="text-[12px] text-gray-400 md:text-lg">
                   No hay categorías destacadas disponibles
                 </p>
               </motion.div>
@@ -83,17 +86,17 @@ export default function CategoriesSection({
 
           {categorias.length > 3 && !showAllCategorias && (
             <motion.div
-              className="flex justify-center pt-4"
+              className="flex justify-center pt-2"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
             >
               <button
                 onClick={() => setShowAllCategorias(true)}
-                className="inline-flex items-center justify-center bg-secondary hover:bg-secondary/90 text-success-strong px-8 py-3 rounded-xl font-semibold transition-all duration-300 shadow-md hover:shadow-lg"
+                className="inline-flex items-center justify-center rounded-xl bg-secondary px-5 py-2.5 text-[12px] font-semibold text-black shadow-md transition-all duration-300 hover:bg-secondary/90 hover:shadow-lg"
               >
                 Ver todos los destinos ({categorias.length})
-                <ArrowRight className="ml-2 h-5 w-5" />
+                <ArrowRight className="ml-2 h-4 w-4" />
               </button>
             </motion.div>
           )}

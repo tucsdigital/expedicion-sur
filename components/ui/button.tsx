@@ -9,16 +9,16 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        /* Amarillo con texto verde visible: botón principal por defecto */
-        default: "bg-secondary text-success-strong font-semibold hover:bg-secondary/90",
+        /* Beige con texto negro */
+        default: "bg-secondary text-black font-semibold hover:bg-secondary/90",
         /* Verde: WhatsApp, reservar, confirmar */
         success: "bg-success text-white font-semibold hover:bg-success/90",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:
-          "border border-secondary bg-transparent text-success-strong hover:bg-secondary/10 dark:border-secondary dark:hover:bg-secondary/10",
+          "border border-secondary bg-transparent text-black hover:bg-secondary/10 dark:border-secondary dark:hover:bg-secondary/10",
         secondary:
-          "bg-secondary text-success-strong font-semibold hover:bg-secondary/80",
+          "bg-secondary text-black font-semibold hover:bg-secondary/80",
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",

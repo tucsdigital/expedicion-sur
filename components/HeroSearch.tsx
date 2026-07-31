@@ -12,6 +12,7 @@ interface HeroSearchProps {
 
 export default function HeroSearch({ paquetes }: HeroSearchProps) {
   const router = useRouter();
+  const suggestionsListId = "hero-search-suggestions";
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -140,16 +141,16 @@ export default function HeroSearch({ paquetes }: HeroSearchProps) {
   };
 
   return (
-    <div className="relative w-full max-w-4xl mx-auto bg-white rounded-2xl shadow-xl p-2 md:p-4 text-gray-800" ref={containerRef}>
-      <div className="flex flex-col md:flex-row gap-3">
+    <div className="relative mx-auto w-full max-w-4xl rounded-[20px] bg-white p-1.5 shadow-xl text-gray-800 md:rounded-2xl md:p-4" ref={containerRef}>
+      <div className="flex flex-col gap-1.5 md:flex-row md:gap-3">
         {/* Input Buscador */}
         <div className="relative flex-1">
-          <div className="flex items-center bg-gray-50 rounded-xl px-4 py-3 border border-transparent focus-within:border-primary focus-within:bg-white transition-colors">
-            <Search className="w-5 h-5 text-gray-400 mr-3" />
+          <div className="flex items-center rounded-[15px] border border-transparent bg-gray-50 px-3 py-2 transition-colors focus-within:border-primary focus-within:bg-white md:rounded-xl md:px-4 md:py-3">
+            <Search className="mr-2 h-3.5 w-3.5 text-gray-400 md:mr-3 md:h-5 md:w-5" />
             <input 
               type="text"
               placeholder="¿A dónde quieres viajar?"
-              className="w-full bg-transparent outline-none text-gray-700 placeholder-gray-400"
+              className="w-full bg-transparent text-[12px] text-gray-700 outline-none placeholder:text-[12px] placeholder:text-gray-400 md:text-base md:placeholder:text-base"
               value={q}
               onChange={e => {
                 setQ(e.target.value);
@@ -161,28 +162,33 @@ export default function HeroSearch({ paquetes }: HeroSearchProps) {
               onKeyDown={handleKeyDown}
               role="combobox"
               aria-expanded={showSuggestions}
+              aria-controls={suggestionsListId}
               aria-autocomplete="list"
             />
             {q && (
-              <button onClick={() => { setQ(""); setSelectedSlug(null); setSelectedDestino(null); }} className="p-1 hover:bg-gray-200 rounded-full">
-                <X className="w-4 h-4 text-gray-500" />
+              <button onClick={() => { setQ(""); setSelectedSlug(null); setSelectedDestino(null); }} className="rounded-full p-1 hover:bg-gray-200">
+                <X className="h-3.5 w-3.5 text-gray-500" />
               </button>
             )}
           </div>
 
           {/* Autocomplete Dropdown */}
           {showSuggestions && (debouncedQ.trim().length > 0) && totalSuggestions > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50">
+            <div
+              id={suggestionsListId}
+              role="listbox"
+              className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-[16px] border border-gray-100 bg-white shadow-2xl md:mt-2 md:rounded-xl"
+            >
               {suggestions.destinos.length > 0 && (
                 <div className="py-2">
-                  <div className="px-4 py-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Destinos</div>
+                  <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 md:text-xs">Destinos</div>
                   {suggestions.destinos.map((dest, idx) => (
                     <div 
                       key={`dest-${idx}`}
-                      className={`px-4 py-2 cursor-pointer flex items-center gap-3 ${activeIndex === idx ? "bg-gray-50" : "hover:bg-gray-50"}`}
+                      className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 text-[12px] ${activeIndex === idx ? "bg-gray-50" : "hover:bg-gray-50"} md:gap-3 md:px-4 md:text-base`}
                       onClick={() => selectSuggestion(idx)}
                     >
-                      <MapPin className="w-4 h-4 text-primary" />
+                      <MapPin className="h-3.5 w-3.5 text-primary md:h-4 md:w-4" />
                       <span>{dest}</span>
                     </div>
                   ))}
@@ -190,19 +196,19 @@ export default function HeroSearch({ paquetes }: HeroSearchProps) {
               )}
               {suggestions.paquetes.length > 0 && (
                 <div className="py-2 border-t border-gray-50">
-                  <div className="px-4 py-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Excursiones</div>
+                  <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 md:text-xs">Excursiones</div>
                   {suggestions.paquetes.map((paq, idx) => {
                     const globalIdx = suggestions.destinos.length + idx;
                     return (
                       <div 
                         key={`paq-${idx}`}
-                        className={`px-4 py-2 cursor-pointer flex items-center gap-3 ${activeIndex === globalIdx ? "bg-gray-50" : "hover:bg-gray-50"}`}
+                        className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 ${activeIndex === globalIdx ? "bg-gray-50" : "hover:bg-gray-50"} md:gap-3 md:px-4`}
                         onClick={() => selectSuggestion(globalIdx)}
                       >
-                        <Search className="w-4 h-4 text-gray-400" />
+                        <Search className="h-3.5 w-3.5 text-gray-400 md:h-4 md:w-4" />
                         <div>
-                          <div className="text-sm font-medium">{paq.titulo}</div>
-                          {paq.destino && <div className="text-xs text-gray-500">{paq.destino}</div>}
+                          <div className="text-[12px] font-medium md:text-base">{paq.titulo}</div>
+                          {paq.destino && <div className="text-[11px] text-gray-500 md:text-xs">{paq.destino}</div>}
                         </div>
                       </div>
                     );
@@ -214,13 +220,13 @@ export default function HeroSearch({ paquetes }: HeroSearchProps) {
         </div>
 
         {/* Selector de Mes */}
-        <div className="w-full md:w-56 relative">
-          <div className="flex items-center bg-gray-50 rounded-xl px-4 py-3 border border-transparent focus-within:border-primary focus-within:bg-white transition-colors h-full">
-            <Calendar className="w-5 h-5 text-gray-400 mr-3 shrink-0" />
+        <div className="relative w-full md:w-56">
+          <div className="flex h-full items-center rounded-[15px] border border-transparent bg-gray-50 px-3 py-2 transition-colors focus-within:border-primary focus-within:bg-white md:rounded-xl md:px-4 md:py-3">
+            <Calendar className="mr-2 h-3.5 w-3.5 shrink-0 text-gray-400 md:mr-3 md:h-5 md:w-5" />
             <select
               value={mes}
               onChange={(e) => setMes(e.target.value)}
-              className="w-full bg-transparent outline-none text-gray-700 cursor-pointer appearance-none truncate"
+              className="w-full cursor-pointer appearance-none truncate bg-transparent text-[12px] text-gray-700 outline-none md:text-base"
             >
               <option value="">Cualquier fecha</option>
               {mesesDisponibles.map((m) => (
@@ -235,7 +241,7 @@ export default function HeroSearch({ paquetes }: HeroSearchProps) {
         {/* Botón Buscar */}
         <Button 
           onClick={handleSearch}
-          className="h-auto py-3 px-8 rounded-xl bg-primary text-white hover:bg-primary/90 font-semibold transition-colors"
+          className="h-10 rounded-[15px] bg-primary px-5 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-primary/90 md:h-auto md:rounded-xl md:px-8 md:py-3 md:text-base"
         >
           Buscar
         </Button>

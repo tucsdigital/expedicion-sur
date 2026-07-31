@@ -37,21 +37,21 @@ export default function BlogSection({
   if (posts.length === 0) return null;
 
   return (
-    <section className="py-8 md:py-12 bg-transparent border-t border-primary/10 overflow-x-hidden">
+    <section className="overflow-x-hidden border-t border-primary/10 bg-transparent py-6 md:py-12">
       <div className="container mx-auto px-4 md:px-6 lg:px-8">
         <motion.div
-          className="mb-10 md:mb-14 max-w-3xl"
+          className="mb-7 max-w-3xl md:mb-14"
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-150px" }}
           variants={staggerFastVariants}
           transition={{ staggerChildren: 0.16, delayChildren: 0.2 }}
         >
-          <motion.div className="inline-block mb-4" variants={fadeInDownVariants}>
+          <motion.div className="mb-2 inline-block md:mb-4" variants={fadeInDownVariants}>
             <span className="badge-pluma pluma-underline block">Blog</span>
           </motion.div>
           <motion.h2
-            className="text-lg md:text-lg lg:text-lg font-bold leading-tight overflow-hidden"
+            className="overflow-hidden text-[15px] font-bold leading-tight md:text-lg lg:text-lg"
             variants={fadeInRightVariants}
             transition={{ duration: 0.7 }}
           >
@@ -60,7 +60,7 @@ export default function BlogSection({
             </motion.span>
           </motion.h2>
           <motion.p
-            className="text-sm md:text-sm text-[#4B5563] overflow-hidden"
+            className="overflow-hidden text-[12px] text-[#4B5563] md:text-sm"
             variants={fadeInUpVariants}
             transition={{ duration: 0.65 }}
           >
@@ -71,7 +71,7 @@ export default function BlogSection({
         </motion.div>
 
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8"
+          className="grid grid-cols-2 gap-3.5 md:grid-cols-2 md:gap-8 lg:grid-cols-4"
           variants={fadeInScaleVariants}
           transition={{ duration: 0.65, delay: 0.05 }}
         >

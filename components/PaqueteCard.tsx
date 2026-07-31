@@ -117,7 +117,7 @@ export default function PaqueteCard({
       }}
     >
       <Link href={`${basePath}/${paquete.slug}`} className="block">
-        <Card className="group relative flex h-full min-h-[340px] w-full max-w-sm flex-col gap-0 overflow-hidden rounded-2xl border-0 bg-[#101828] py-0 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl mx-auto aspect-4/5">
+        <Card className="group relative mx-auto flex h-full min-h-[300px] w-full max-w-sm flex-col gap-0 overflow-hidden rounded-2xl border-0 bg-[#101828] py-0 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl aspect-4/5 md:min-h-[340px]">
           {/* Imagen de fondo a pantalla completa */}
           <div className="absolute inset-0">
             <Image
@@ -141,47 +141,47 @@ export default function PaqueteCard({
           {/* Contenido sobre la imagen (z-10) */}
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
             {/* Zona superior: Badge + Compartir */}
-            <div className="flex items-start justify-between p-3">
-              <Badge className="bg-[rgba(2,6,23,0.72)] text-white text-[10px] font-medium backdrop-blur-sm md:text-sm px-2 py-0.5 border border-white/10 hover:bg-[rgba(2,6,23,0.72)]">
+            <div className="flex items-start justify-between p-2.5 md:p-3">
+              <Badge className="border border-white/10 bg-[rgba(2,6,23,0.72)] px-2 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm hover:bg-[rgba(2,6,23,0.72)] md:text-sm">
                 {badgeTexto}
               </Badge>
               <button
                 type="button"
                 onClick={handleShare}
-                className="rounded-full bg-white/95 p-2 text-[#0f172a] transition-transform hover:scale-110 hover:bg-white md:p-3 shadow-lg"
+                className="rounded-full bg-white/95 p-1.5 text-[#0f172a] shadow-lg transition-transform hover:scale-110 hover:bg-white md:p-3"
                 title="Compartir paquete"
                 aria-label="Compartir paquete"
               >
-                <Share2 className="h-4 w-4 md:h-5 md:w-5" />
+                <Share2 className="h-3.5 w-3.5 md:h-5 md:w-5" />
               </button>
             </div>
 
             {/* Contenido: destino, título, descripción, features, duración */}
-            <CardContent className="mt-auto p-4 pt-0">
-              <div className="flex items-center gap-2 text-gray-400">
+            <CardContent className="mt-auto p-3 pt-0 md:p-4 md:pt-0">
+              <div className="flex items-center gap-1.5 text-gray-400 md:gap-2">
                 <MapPin className="h-3 w-3 shrink-0 text-white md:h-3.5 md:w-3.5" />
-                <span className="text-[10px] font-medium text-white md:text-sm">
+                <span className="text-[9px] font-medium text-white md:text-sm">
                   {textoDestino}
                 </span>
               </div>
-              <h3 className="font-heading text-xs font-bold text-white transition-colors group-hover:text-white/90 md:text-sm lg:text-sm mt-1">
+              <h3 className="mt-1 font-heading text-[11px] font-bold text-white transition-colors group-hover:text-white/90 md:text-sm lg:text-sm">
                 {paquete.titulo}
               </h3>
-              <p className="text-[10px] text-white/80 line-clamp-3 mt-1 md:text-sm">
+              <p className="mt-1 line-clamp-3 text-[9px] text-white/80 md:text-sm">
                 {getDescripcion()}
               </p>
 
               {/* Features: iconos con tooltip */}
               {features.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
+                <div className="mt-2.5 flex flex-wrap gap-1 md:mt-3">
                   {features.map((feature, idx) => (
                     <div
                       key={idx}
-                      className="group/feature relative flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(2,6,23,0.38)] border border-white/10 backdrop-blur-sm md:h-7 md:w-7"
+                      className="group/feature relative flex h-5 w-5 items-center justify-center rounded-md border border-white/10 bg-[rgba(2,6,23,0.38)] backdrop-blur-sm md:h-7 md:w-7"
                       title={feature.label}
                       aria-label={feature.label}
                     >
-                      <span className="[&_svg]:h-3.5 [&_svg]:w-3.5 text-white md:[&_svg]:h-4 md:[&_svg]:w-4">
+                      <span className="text-white [&_svg]:h-3 [&_svg]:w-3 md:[&_svg]:h-4 md:[&_svg]:w-4">
                         {feature.icon}
                       </span>
                       {/* Tooltip al hover */}
@@ -196,51 +196,51 @@ export default function PaqueteCard({
                 </div>
               )}
 
-              <div className="mt-2 flex items-center gap-2 text-gray-400">
+              <div className="mt-2 flex items-center gap-1.5 text-gray-400 md:gap-2">
                 <Clock className="h-3 w-3 shrink-0 text-white md:h-3.5 md:w-3.5" />
-                <span className="text-[10px] font-medium text-white md:text-sm">
+                <span className="text-[9px] font-medium text-white md:text-sm">
                   {paquete.duracion}
                 </span>
               </div>
             </CardContent>
 
             {/* Pie: precio / próxima salida + Ver más */}
-            <CardFooter className="flex items-center justify-between p-4 pt-2">
+            <CardFooter className="flex items-center justify-between p-3 pt-1.5 md:p-4 md:pt-2">
               <div>
                 {primeraSalida ? (
                   <>
-                    <p className="text-[10px] text-gray-400 md:text-xs">
+                    <p className="text-[9px] text-gray-400 md:text-xs">
                       Próxima salida:{' '}
                       {new Date(primeraSalida.fecha + 'T00:00:00').toLocaleDateString('es-AR', {
                         day: 'numeric',
                         month: 'short',
                       })}
                     </p>
-                    <p className="font-heading text-xs font-bold text-white md:text-sm">
+                    <p className="font-heading text-[11px] font-bold text-white md:text-sm">
                       {primeraSalida.moneda} ${primeraSalida.precio.toLocaleString('es-AR')}
                     </p>
                   </>
                 ) : (
                   <>
                     {paquete.mostrarDesde && (
-                      <p className="text-[10px] text-gray-400 md:text-xs">Desde</p>
+                      <p className="text-[9px] text-gray-400 md:text-xs">Desde</p>
                     )}
                     {tarifaEspecial.activa && tarifaEspecial.precioEspecial ? (
                       <div className="space-y-1">
-                        <p className="text-[10px] text-gray-400 line-through md:text-xs">
+                        <p className="text-[9px] text-gray-400 line-through md:text-xs">
                           {paquete.moneda || 'ARS'} ${paquete.precio.toLocaleString('es-AR')}
                         </p>
-                        <p className="font-heading text-xs font-bold text-amber-300 md:text-sm">
+                        <p className="font-heading text-[11px] font-bold text-amber-300 md:text-sm">
                           {paquete.moneda || 'ARS'} ${tarifaEspecial.precioEspecial.toLocaleString('es-AR')}
                         </p>
                         {tarifaEspecial.fechaLimiteLabel && (
-                          <p className="text-[10px] text-amber-200 md:text-xs">
+                          <p className="text-[9px] text-amber-200 md:text-xs">
                             Hasta el {tarifaEspecial.fechaLimiteLabel}
                           </p>
                         )}
                       </div>
                     ) : (
-                      <p className="font-heading text-xs font-bold text-white md:text-sm">
+                      <p className="font-heading text-[11px] font-bold text-white md:text-sm">
                         {paquete.moneda || 'ARS'} ${paquete.precio.toLocaleString('es-AR')}
                       </p>
                     )}
@@ -249,7 +249,7 @@ export default function PaqueteCard({
               </div>
               <Button
                 size="sm"
-                className="bg-white text-[#0f172a] hover:bg-gray-100 font-semibold transition-transform hover:translate-x-1 shrink-0"
+                className="h-8 shrink-0 bg-white px-2.5 text-[10px] font-semibold text-[#0f172a] transition-transform hover:translate-x-1 hover:bg-gray-100 md:h-9 md:px-3 md:text-sm"
               >
                 <span className="hidden md:inline">Ver más</span>
                 <ArrowRight className="h-3 w-3 md:ml-1 md:h-4 md:w-4" />
@@ -258,7 +258,7 @@ export default function PaqueteCard({
           </div>
 
           {paquete.destacado && (
-            <Badge className="absolute top-3 right-14 z-20 bg-[rgba(2,6,23,0.82)] font-semibold text-white hover:bg-[rgba(2,6,23,0.82)] border border-white/10">
+            <Badge className="absolute right-12 top-2.5 z-20 border border-white/10 bg-[rgba(2,6,23,0.82)] text-[9px] font-semibold text-white hover:bg-[rgba(2,6,23,0.82)] md:right-14 md:top-3 md:text-xs">
               Destacado
             </Badge>
           )}

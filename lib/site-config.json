@@ -1,98 +1,87 @@
 {
-  "branding": {
-    "name": "Baft"
+  "agencyName": "Expedición Sur",
+  "heroTagline": "Experiencias auténticas, excursiones, traslados y paquetes personalizados para descubrir el sur argentino.",
+  "aboutUs": "Inspirados en la Loica, símbolo de orientación y conexión con la naturaleza, nuestro objetivo es brindar servicios turísticos de calidad que conecten a cada viajero con la auténtica Patagonia.\n\nNos enfocamos en ofrecer experiencias memorables, seguras y personalizadas, destacándonos por la calidez en la atención, el conocimiento del territorio y el compromiso con el entorno.\n\nQueremos ser la elección preferida de quienes buscan descubrir el sur de manera distinta: con propósito, emoción y confianza.",
+  "businessHours": "08:00 a 21:00 hs",
+  "logoUrl": "/images/logo-expedicion-sur.png",
+  "contact": {
+    "address": "El Calafate, Santa Cruz, Argentina",
+    "email": "reservas@expedicionsur.com",
+    "phone": "+54 9 2966 243032",
+    "secondaryPhone": "",
+    "whatsappNumber": "5492966243032",
+    "mapUrl": "https://www.google.com/maps?q=El+Calafate,+Santa+Cruz,+Argentina&output=embed"
   },
-  "palette": {
-    "primary": "#1F341C",
-    "secondary": "#020202"
-  },
-  "logo": {
-    "url": "/images/logo.jpg"
-  },
-  "seo": {
-    "title": "Baft",
-    "description": "Baft es mas que agencia de turismo, funciona también como un centro de informes funcional a cada visitante, un punto de encuentro para intercambiar experiencias y datos con lugareños y otros viajeros.",
-    "image": "/images/logo.jpg"
-  },
-  "hero": {
-    "title": "Baft",
-    "image": "/images/banner.jpg"
-  },
-  "contacto": {
-    "email": "baftcontact@gmail.com",
-    "phone": "2966701907",
-    "businessHours": "10:00hs a 20:00hs"
-  },
-  "mapa": {
-    "show": false
-  },
-  "redes": {
-    "items": [
-      {
-        "platform": "Facebook",
-        "url": "https://www.facebook.com/people/Hike-in-Patagonia/100092563431643/"
-      },
-      {
-        "platform": "Instagram",
-        "url": "https://www.instagram.com/hikinpatagonia"
-      }
-    ]
-  },
-  "content": {
-    "about": {
-      "paragraphs": [
-        "Baft es mas que agencia de turismo, funciona también como un centro de informes funcional a cada visitante, un punto de encuentro para intercambiar experiencias y datos con lugareños y otros viajeros.",
-        "Estamos conformada por jóvenes profesionales del turismo, quienes entendemos que el visitante no es sólo un “Turista” sino una persona interesada en conocer el lugar en donde vivimos, Patagonia, Argentina y Chilena.",
-        "Partiendo de este concepto, brindamos al viajero un abanico de posibilidades según cada perfil, posibilidades económicas y disponibilidad horaria les sugerimos las mejores opciones."
-      ]
+  "services": [
+    {
+      "icon": "MountainSnow",
+      "title": "Tour Glaciar Perito Moreno",
+      "desc": "Excursión para conocer uno de los glaciares más importantes del mundo con servicio organizado y atención personalizada."
     },
-    "services": {
-      "items": [
-        {
-          "title": "Excursiones en Patagonia",
-          "description": "Viví recorridos únicos por paisajes naturales, glaciares, montañas y destinos imperdibles de la región."
-        },
-        {
-          "title": "Alquiler de bicicletas",
-          "description": "Explorá El Calafate y sus alrededores a tu ritmo, con una forma práctica, libre y diferente de moverte."
-        },
-        {
-          "title": "Aventuras al aire libre",
-          "description": "Creamos experiencias pensadas para conectar con la naturaleza, disfrutar el camino y descubrir nuevos lugares."
-        },
-        {
-          "title": "Viajes flexibles y personalizados",
-          "description": "Te ayudamos a elegir la experiencia ideal según tu tiempo, tus intereses y tu forma de viajar."
-        }
-      ]
+    {
+      "icon": "Route",
+      "title": "Full Day El Chalten - Laguna de los Tres",
+      "desc": "Experiencia ideal para quienes desean recorrer uno de los senderos más emblemáticos de la Patagonia."
     },
-    "values": {
-      "items": [
-        {
-          "title": "Experiencia local",
-          "description": "Conocemos la Patagonia y te recomendamos desde la experiencia real, no desde un catálogo."
-        },
-        {
-          "title": "Atención cercana",
-          "description": "Te acompañamos con buena onda, claridad y predisposición desde el primer contacto."
-        },
-        {
-          "title": "Flexibilidad",
-          "description": "Buscamos que cada viajero pueda disfrutar la Patagonia a su manera, con opciones simples y adaptables."
-        },
-        {
-          "title": "Pasión por la aventura",
-          "description": "Nos gusta lo que hacemos y eso se nota en cada recorrido, recomendación y experiencia."
-        },
-        {
-          "title": "Experiencias auténticas",
-          "description": "No vendemos solo excursiones: creamos momentos para vivir la Patagonia de verdad."
-        },
-        {
-          "title": "Compromiso con el viajero",
-          "description": "Queremos que disfrutes, te sientas seguro y te lleves un recuerdo inolvidable."
-        }
-      ]
+    {
+      "icon": "Compass",
+      "title": "Full Day El Chalten Classic",
+      "desc": "Recorrido completo para descubrir los principales atractivos de El Chaltén en una jornada."
+    },
+    {
+      "icon": "ShipWheel",
+      "title": "Excursion Todos los Glaciares",
+      "desc": "Navegación entre glaciares con paisajes únicos y naturaleza en estado puro."
     }
-  }
+  ],
+  "values": [
+    {
+      "icon": "Users",
+      "title": "Atención personalizada",
+      "description": "Cada viaje se adapta a las necesidades del pasajero."
+    },
+    {
+      "icon": "MapPinned",
+      "title": "Experiencia local",
+      "description": "Conocemos la Patagonia porque vivimos en ella."
+    },
+    {
+      "icon": "ShieldCheck",
+      "title": "Seguridad",
+      "description": "Operadores y logística planificada."
+    },
+    {
+      "icon": "BadgeCheck",
+      "title": "Calidad",
+      "description": "Buscamos superar las expectativas."
+    },
+    {
+      "icon": "Sparkles",
+      "title": "Flexibilidad",
+      "description": "Opciones individuales, grupales y privadas."
+    },
+    {
+      "icon": "HeartHandshake",
+      "title": "Compromiso",
+      "description": "Acompañamos al viajero antes, durante y después del viaje."
+    }
+  ],
+  "socialLinks": [
+    {
+      "platform": "instagram",
+      "url": "https://www.instagram.com/expedicionsur.fte"
+    }
+  ],
+  "showMap": true,
+  "siteUrlDefault": "https://expedicionsur.com",
+  "keywords": [
+    "expedicion sur",
+    "patagonia",
+    "excursiones en patagonia",
+    "perito moreno",
+    "el chalten",
+    "ushuaia",
+    "viajes patagonia",
+    "turismo sur argentino"
+  ]
 }

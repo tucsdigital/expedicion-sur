@@ -16,9 +16,15 @@ type HeroSectionProps = {
   whatsappLink: string;
   /** Si es true, no se muestra el botón de WhatsApp en el hero (se usa un botón flotante en la página). */
   hideWhatsApp?: boolean;
+  showBrandBadge?: boolean;
 };
 
-export default function HeroSection({ experience, whatsappLink, hideWhatsApp }: HeroSectionProps) {
+export default function HeroSection({
+  experience,
+  whatsappLink,
+  hideWhatsApp,
+  showBrandBadge = true,
+}: HeroSectionProps) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const logoSrc = getBrandLogoSrc();
   const logoAlt = renderTemplate(siteConfig.branding.logo.altTextTemplate || '{{siteName}} Logo');
@@ -56,28 +62,30 @@ export default function HeroSection({ experience, whatsappLink, hideWhatsApp }: 
           <span className="absolute inset-0 rounded-full bg-linear-to-r from-transparent via-primary/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         </motion.div>
 
-        <motion.div className="mt-3 flex justify-start" variants={fadeUp}>
-          <div className="flex items-center gap-3 rounded-full border border-primary/10 bg-white/85 px-3 py-1.5 shadow-sm backdrop-blur">
-            {isRemoteUrl(logoSrc) ? (
-              <img
-                src={logoSrc}
-                alt={logoAlt}
-                className="h-6 w-auto sm:h-7 object-contain"
-              />
-            ) : (
-              <Image
-                src={logoSrc}
-                alt={logoAlt}
-                width={88}
-                height={28}
-                className="h-6 w-auto sm:h-7"
-              />
-            )}
-            <span className="font-logo text-primary text-xl leading-none whitespace-nowrap">
-              {siteConfig.branding.logo.titleText}
-            </span>
-          </div>
-        </motion.div>
+        {showBrandBadge ? (
+          <motion.div className="mt-3 flex justify-start" variants={fadeUp}>
+            <div className="flex items-center gap-3 rounded-full border border-primary/10 bg-white/85 px-3 py-1.5 shadow-sm backdrop-blur">
+              {isRemoteUrl(logoSrc) ? (
+                <img
+                  src={logoSrc}
+                  alt={logoAlt}
+                  className="h-6 w-auto object-contain sm:h-7"
+                />
+              ) : (
+                <Image
+                  src={logoSrc}
+                  alt={logoAlt}
+                  width={88}
+                  height={28}
+                  className="h-6 w-auto sm:h-7"
+                />
+              )}
+              <span className="font-logo text-primary text-xl leading-none whitespace-nowrap">
+                {siteConfig.branding.logo.titleText}
+              </span>
+            </div>
+          </motion.div>
+        ) : null}
 
         <div className="mt-6 flex flex-col items-center gap-6">
           <motion.div

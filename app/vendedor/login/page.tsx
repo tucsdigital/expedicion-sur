@@ -206,7 +206,7 @@ export default function VendorLoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="vendedor@elsherpa.com"
+                placeholder="vendedor@expedicionsur.com"
                 required
                 disabled={loading}
                 className="h-12 text-lg border-gray-300 focus:border-primary focus:ring-primary/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"

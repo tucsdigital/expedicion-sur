@@ -185,7 +185,7 @@ export default function Hero({
                 <Button
                   asChild
                   size="lg"
-                  className="bg-secondary text-success-strong hover:bg-secondary/90 font-semibold text-base px-8 py-6"
+                  className="bg-secondary text-black hover:bg-secondary/90 font-semibold text-base px-8 py-6"
                 >
                   <a href={ctaLink}>
                     {ctaText}

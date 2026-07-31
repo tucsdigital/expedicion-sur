@@ -1,5 +1,7 @@
-import type { Metadata } from 'next';
-import { Inter, Plus_Jakarta_Sans, Sora } from 'next/font/google';
+import type { CSSProperties } from 'react';
+import type { Metadata, Viewport } from 'next';
+import localFont from 'next/font/local';
+import { Berkshire_Swash, Manrope } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import { SITE_NAME, CONTACT_INFO, SITE_URL, SITE_DESCRIPTION } from '@/lib/constants';
@@ -7,24 +9,22 @@ import SchemaOrg from '@/components/SchemaOrg';
 import PageTransition from '@/components/PageTransition';
 import { getOpenGraphImageAbsolute, getSiteIconAbsolute, renderTemplate, siteConfig } from '@/lib/siteConfig';
 
-const sora = Sora({
-  subsets: ['latin'],
-  weight: ['600', '700'],
-  variable: '--font-sora',
+const brandHeading = localFont({
+  src: './fonts/tt-norms-pro-bold/tt-norms-pro-bold.woff2',
+  variable: '--font-brand-heading',
   display: 'swap',
 });
 
-const plusJakarta = Plus_Jakarta_Sans({
+const manrope = Manrope({
   subsets: ['latin'],
-  weight: ['500', '600'],
-  variable: '--font-plus-jakarta',
+  variable: '--font-manrope',
   display: 'swap',
 });
 
-const inter = Inter({
+const berkshireSwash = Berkshire_Swash({
   subsets: ['latin'],
-  weight: ['400', '500'],
-  variable: '--font-inter',
+  weight: '400',
+  variable: '--font-berkshire-swash',
   display: 'swap',
 });
 
@@ -111,10 +111,10 @@ export const metadata: Metadata = {
       { url: siteIconUrl },
     ],
   },
-  manifest: '/manifest.webmanifest',
+  manifest: '/site.webmanifest',
 };
 
-export const viewport = {
+export const viewport: Viewport = {
   themeColor: siteConfig.branding.palette.primary,
 };
 
@@ -126,16 +126,16 @@ export default function RootLayout({
   const cssVars = {
     ['--sherpa-blue' as string]: siteConfig.branding.palette.primary,
     ['--sherpa-yellow' as string]: siteConfig.branding.palette.secondary,
-    ['--sherpa-green' as string]: siteConfig.branding.palette.success,
-    ['--sherpa-green-strong' as string]: siteConfig.branding.palette.successStrong,
+    ['--sherpa-green' as string]: '#CA9E67',
+    ['--sherpa-green-strong' as string]: '#8E6B45',
     ['--sherpa-black' as string]: siteConfig.branding.palette.dark,
     ['--sherpa-cream' as string]: siteConfig.branding.palette.cream,
-  } as React.CSSProperties;
+  } as CSSProperties;
 
   return (
     <html
       lang="es"
-      className={`${sora.variable} ${plusJakarta.variable} ${inter.variable}`}
+      className={`${brandHeading.variable} ${manrope.variable} ${berkshireSwash.variable}`}
       data-scroll-behavior="smooth"
       style={cssVars}
     >
@@ -153,7 +153,7 @@ export default function RootLayout({
         
         <link rel="icon" href={siteIconUrl} />
         <link rel="apple-touch-icon" href={siteIconUrl} />
-        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body className="font-body antialiased">
         <SchemaOrg />

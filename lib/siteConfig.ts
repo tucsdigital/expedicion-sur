@@ -537,27 +537,27 @@ function toLegacySiteConfigFromV3(v3: SiteConfigV3): Partial<SiteConfig> {
 
 const DEFAULT_SITE_CONFIG: SiteConfig = {
   branding: {
-    siteName: 'Sitio',
-    siteDescription: 'Descripción del sitio',
-    siteUrlDefault: 'https://example.com',
+    siteName: 'Expedición Sur',
+    siteDescription: 'Experiencias auténticas, excursiones, traslados y paquetes personalizados para descubrir el sur argentino.',
+    siteUrlDefault: 'https://expedicionsur.com',
     logo: {
-      imagePath: '/logo.png',
+      imagePath: '/images/logo-expedicion-sur.png',
       imageUrl: '',
-      titleText: 'Sitio',
+      titleText: 'Expedición Sur',
       altTextTemplate: '{{siteName}} Logo',
     },
     palette: {
-      primary: '#0B6E4F',
-      secondary: '#F2C14E',
-      success: '#16A34A',
-      successStrong: '#15803D',
-      dark: '#0F172A',
-      cream: '#FAF7F0',
+      primary: '#E30613',
+      secondary: '#CBBBA0',
+      success: '#CA9E67',
+      successStrong: '#8E6B45',
+      dark: '#111111',
+      cream: '#F7F2EA',
     },
   },
   company: {
-    adminEmailDefault: 'admin@example.com',
-    whatsappMessageDefault: 'Hola! Quiero consultar por: ',
+    adminEmailDefault: 'reservas@expedicionsur.com',
+    whatsappMessageDefault: 'Hola! Quiero reservar una experiencia en Patagonia: ',
     contact: {
       direccion: '',
       horario: '',
@@ -814,9 +814,10 @@ export const siteConfig: SiteConfig = normalizeSiteConfig(deepMerge(DEFAULT_SITE
 
 export function getHomeBackgroundImageFallbackUrl() {
   if (!isSiteConfigV3(rawConfig)) return '';
-  const type = String(rawConfig.backgroundType ?? '').trim().toLowerCase();
+  const config = rawConfig as SiteConfigV3;
+  const type = String(config.backgroundType ?? '').trim().toLowerCase();
   if (type !== 'imagen') return '';
-  return ensureString(rawConfig.backgroundImageUrl, '', { allowEmpty: true });
+  return ensureString(config.backgroundImageUrl, '', { allowEmpty: true });
 }
 
 export function resolveTokenValue(token: SiteToken): string {

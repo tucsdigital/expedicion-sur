@@ -11,8 +11,9 @@ import TestimonialsSection from './TestimonialsSection';
 import ReservaWidget from './ReservaWidget';
 import MidVideoSection from './MidVideoSection';
 import FaqSection from './FaqSection';
-import LandingFooter from './LandingFooter';
 import WhatsAppCtaButton from './WhatsAppCtaButton';
+import Navbar from '@/components/Navbar';
+import Footer from '@/components/Footer';
 import { getWhatsAppLinkForExperience } from '@/lib/utils/whatsapp';
 import { toBookingPublicData } from '@/lib/experiencias';
 import ScrollSmoother from '@/components/ScrollSmoother';
@@ -108,7 +109,13 @@ export default function LandingReservaPage({ experienceProp }: Props) {
   return (
     <div className="landing-reserva">
       <ScrollSmoother />
-      <HeroSection experience={experience} whatsappLink={whatsappLink} hideWhatsApp />
+      <Navbar reserveSpace />
+      <HeroSection
+        experience={experience}
+        whatsappLink={whatsappLink}
+        hideWhatsApp
+        showBrandBadge={false}
+      />
       <ImageCarousel
         images={experience.cardImage ? [experience.cardImage, ...(experience.images ?? [])] : (experience.images ?? [])}
         title={experience.title}
@@ -118,7 +125,7 @@ export default function LandingReservaPage({ experienceProp }: Props) {
       <CtaSection
         whatsappLink={whatsappLink}
         title={`Reservá tu lugar en ${experience.title}`}
-        description="Coordinamos todo para que vivas una experiencia a tu medida con Viaggio Tur."
+        description="Coordinamos todo para que vivas una experiencia a tu medida con Expedición Sur."
         dividerText={experience.dividerPhrase}
         sectionId="cta-reserva"
         hideWhatsApp
@@ -141,7 +148,7 @@ export default function LandingReservaPage({ experienceProp }: Props) {
       )}
       <MidVideoSection experience={experience} />
       <FaqSection faqs={experience.faqs} />
-      <LandingFooter />
+      <Footer />
     </div>
   );
 }

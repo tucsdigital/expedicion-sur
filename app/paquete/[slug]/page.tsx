@@ -13,6 +13,7 @@ import { ArrowDownLeft, ArrowUpRight, CheckCircle, XCircle } from 'lucide-react'
 import type { Metadata } from 'next';
 import { SITE_NAME, SITE_URL } from '@/lib/constants';
 import { serializeFirestoreData } from '@/lib/utils/serialize';
+import { slugify } from '@/lib/utils/slugify';
 import { getWhatsAppLink } from '@/lib/utils/whatsapp';
 
 /** Sin caché: los cambios del admin se ven de inmesdiato */
@@ -42,22 +43,51 @@ function normalizeCondiciones(raw: unknown) {
   return parsed.length > 0 ? parsed : DEFAULT_CONDICIONES;
 }
 
+type RawPaquete = Paquete & {
+  galeria?: unknown;
+  incluye?: unknown;
+  noIncluye?: unknown;
+  salidas?: unknown;
+  visible?: unknown;
+};
+
+function normalizeStringArray(value: unknown, fallback: string[] = []): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : fallback;
+}
+
+function normalizePaqueteData(raw: RawPaquete): Paquete {
+  const galeria = normalizeStringArray(raw.galeria ?? []);
+  const incluye = normalizeStringArray(raw.incluye ?? []);
+  const noIncluye = normalizeStringArray(raw.noIncluye ?? []);
+  const salidas = Array.isArray(raw.salidas) ? raw.salidas : [];
+  return {
+    ...(raw as Paquete),
+    galeria,
+    incluye,
+    noIncluye,
+    salidas,
+    visible: raw.visible !== false,
+  };
+}
+
 async function getPaquete(slug: string): Promise<Paquete | null> {
   if (!firebaseEnabled) return null;
+  const normalizedSlug = slugify(String(slug || ''));
+  if (!normalizedSlug) return null;
   try {
-    // Query simplificada
-    const q = query(collection(db, 'paquetes'), where('slug', '==', slug), limit(1));
+    const q = query(collection(db, 'paquetes'), where('slug', '==', normalizedSlug), limit(1));
     const snapshot = await getDocs(q);
     if (snapshot.empty) return null;
-    
-    const paquete = serializeFirestoreData<Paquete>({
-      id: snapshot.docs[0].id, 
-      ...snapshot.docs[0].data() 
-    });
-    
-    // Verificar que esté visible
+
+    const paquete = normalizePaqueteData(
+      serializeFirestoreData<RawPaquete>({
+        id: snapshot.docs[0].id,
+        ...snapshot.docs[0].data(),
+      })
+    );
+
     if (!paquete.visible) return null;
-    
+
     return {
       ...paquete,
       condiciones: normalizeCondiciones((paquete as Paquete & { condiciones?: unknown }).condiciones),

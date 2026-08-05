@@ -18,9 +18,9 @@ interface NavbarProps {
 
 const links = [
   { href: '/#inicio', label: 'Inicio' },
-  { href: '/#paquetes', label: 'Paquetes' },
+  { href: '/paquetes', label: 'Paquetes' },
   { href: '/#destinos', label: 'Destinos' },
-  { href: '/#experiencias', label: 'Experiencias' },
+  { href: '/paquetes', label: 'Experiencias' },
   { href: '/#nosotros', label: 'Nosotros' },
   { href: '/#contacto', label: 'Contacto' },
 ];

@@ -50,13 +50,13 @@ export default function Footer() {
               <Link href="/" className="block transition hover:text-white">
                 Inicio
               </Link>
-              <Link href="/#paquetes" className="block transition hover:text-white">
+              <Link href="/paquetes" className="block transition hover:text-white">
                 Paquetes
               </Link>
               <Link href="/#destinos" className="block transition hover:text-white">
                 Destinos
               </Link>
-              <Link href="/#experiencias" className="block transition hover:text-white">
+              <Link href="/paquetes" className="block transition hover:text-white">
                 Experiencias
               </Link>
               <Link href="/#nosotros" className="block transition hover:text-white">

@@ -19,10 +19,6 @@ export function proxy(request: NextRequest) {
   }
 
   const redirects: Array<[boolean, string]> = [
-    [pathname === '/experiencias' || pathname.startsWith('/experiencias/'), '/paquetes'],
-    [pathname === '/paquete' || pathname.startsWith('/paquete/'), '/paquetes'],
-    [pathname === '/categoria' || pathname.startsWith('/categoria/'), '/paquetes'],
-    [pathname === '/blog' || pathname.startsWith('/blog/'), '/'],
     [pathname === '/agencias', '/'],
     [pathname === '/transportes', '/'],
     [pathname === '/riodejaneiro', '/'],

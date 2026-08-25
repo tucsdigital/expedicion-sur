@@ -13,6 +13,7 @@ const r2HostnameFromBaseUrl = (() => {
 
 const nextConfig: NextConfig = {
   images: {
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https' as const,
@@ -27,7 +28,6 @@ const nextConfig: NextConfig = {
           ]
         : []),
     ],
-    formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 31536000, // 1 año
   },
   // Configuración para uploads grandes

@@ -1,0 +1,87 @@
+﻿{
+  "agencyName": "Expedición Sur",
+  "heroTagline": "Experiencias auténticas, excursiones, traslados y paquetes personalizados para descubrir el sur argentino.",
+  "aboutUs": "Inspirados en la Loica, símbolo de orientación y conexión con la naturaleza, nuestro objetivo es brindar servicios turísticos de calidad que conecten a cada viajero con la auténtica Patagonia.\n\nNos enfocamos en ofrecer experiencias memorables, seguras y personalizadas, destacándonos por la calidez en la atención, el conocimiento del territorio y el compromiso con el entorno.\n\nQueremos ser la elección preferida de quienes buscan descubrir el sur de manera distinta: con propósito, emoción y confianza.",
+  "businessHours": "08:00 a 21:00 hs",
+  "logoUrl": "/images/logo-expedicion-sur.png",
+  "contact": {
+    "address": "El Calafate, Santa Cruz, Argentina",
+    "email": "reservas@expedicionsur.com",
+    "phone": "+54 9 2966 243032",
+    "secondaryPhone": "",
+    "whatsappNumber": "5492966243032",
+    "mapUrl": "https://www.google.com/maps?q=El+Calafate,+Santa+Cruz,+Argentina&output=embed"
+  },
+  "services": [
+    {
+      "icon": "MountainSnow",
+      "title": "Tour Glaciar Perito Moreno",
+      "desc": "Excursión para conocer uno de los glaciares más importantes del mundo con servicio organizado y atención personalizada."
+    },
+    {
+      "icon": "Route",
+      "title": "Full Day El Chalten - Laguna de los Tres",
+      "desc": "Experiencia ideal para quienes desean recorrer uno de los senderos más emblemáticos de la Patagonia."
+    },
+    {
+      "icon": "Compass",
+      "title": "Full Day El Chalten Classic",
+      "desc": "Recorrido completo para descubrir los principales atractivos de El Chaltén en una jornada."
+    },
+    {
+      "icon": "ShipWheel",
+      "title": "Excursion Todos los Glaciares",
+      "desc": "Navegación entre glaciares con paisajes únicos y naturaleza en estado puro."
+    }
+  ],
+  "values": [
+    {
+      "icon": "Users",
+      "title": "Atención personalizada",
+      "description": "Cada viaje se adapta a las necesidades del pasajero."
+    },
+    {
+      "icon": "MapPinned",
+      "title": "Experiencia local",
+      "description": "Conocemos la Patagonia porque vivimos en ella."
+    },
+    {
+      "icon": "ShieldCheck",
+      "title": "Seguridad",
+      "description": "Operadores y logística planificada."
+    },
+    {
+      "icon": "BadgeCheck",
+      "title": "Calidad",
+      "description": "Buscamos superar las expectativas."
+    },
+    {
+      "icon": "Sparkles",
+      "title": "Flexibilidad",
+      "description": "Opciones individuales, grupales y privadas."
+    },
+    {
+      "icon": "HeartHandshake",
+      "title": "Compromiso",
+      "description": "Acompañamos al viajero antes, durante y después del viaje."
+    }
+  ],
+  "socialLinks": [
+    {
+      "platform": "instagram",
+      "url": "https://www.instagram.com/expedicionsur.fte"
+    }
+  ],
+  "showMap": true,
+  "siteUrlDefault": "https://expedicionsur.com",
+  "keywords": [
+    "expedicion sur",
+    "patagonia",
+    "excursiones en patagonia",
+    "perito moreno",
+    "el chalten",
+    "ushuaia",
+    "viajes patagonia",
+    "turismo sur argentino"
+  ]
+}

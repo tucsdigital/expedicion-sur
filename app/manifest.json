@@ -1,0 +1,15 @@
+﻿{
+  "name": "Expedicion Sur",
+  "short_name": "Expedicion Sur",
+  "icons": [
+    {
+      "src": "/images/isotipo_baft.png",
+      "sizes": "811x593",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "theme_color": "#E30613",
+  "background_color": "#F7F2EA",
+  "display": "standalone"
+}

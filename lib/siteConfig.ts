@@ -868,7 +868,7 @@ export function getOpenGraphImageAbsolute(siteUrl: string) {
 }
 
 export function getSiteIconSrc() {
-  return '/images/isotipo_baft.png';
+  return '/images/logo-expedicion-sur.png';
 }
 
 export function getSiteIconAbsolute(siteUrl: string) {

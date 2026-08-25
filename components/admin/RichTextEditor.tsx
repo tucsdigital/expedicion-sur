@@ -2,8 +2,6 @@
 
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import Link from '@tiptap/extension-link';
-import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import Image from '@tiptap/extension-image';
 import Youtube from '@tiptap/extension-youtube';
@@ -47,12 +45,11 @@ export default function RichTextEditor({ content, onChange, placeholder, enableM
         heading: {
           levels: [1, 2, 3],
         },
-      }),
-      Underline,
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: {
-          class: 'text-blue-600 underline hover:text-blue-800',
+        link: {
+          openOnClick: false,
+          HTMLAttributes: {
+            class: 'text-blue-600 underline hover:text-blue-800',
+          },
         },
       }),
       ...(enableMedia

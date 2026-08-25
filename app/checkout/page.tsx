@@ -38,6 +38,7 @@ export default async function CheckoutPage({
     slug: paquete.slug,
     title: paquete.titulo,
     subtitle: paquete.subtitulo ?? '',
+    price: paquete.precio,
     cardImage: paquete.imagenCard ?? '',
     images: paquete.imagenes ?? [],
     maxPeople: paquete.bookingConfig?.maxPeoplePerBooking ?? paquete.capacidadMaxima ?? 10,

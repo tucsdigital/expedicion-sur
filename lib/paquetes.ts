@@ -28,13 +28,20 @@ const COLLECTION = 'paquetes';
 const CATEGORIAS_COLLECTION = 'categorias';
 
 async function fetchActiveCategoriasInternal(): Promise<Categoria[]> {
-  const q = query(
-    collection(db, CATEGORIAS_COLLECTION),
-    where('activa', '==', true),
-    orderBy('orden', 'asc')
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => serializeFirestoreData<Categoria>({ id: d.id, ...d.data() }));
+  try {
+    const q = query(
+      collection(db, CATEGORIAS_COLLECTION),
+      where('activa', '==', true),
+      orderBy('orden', 'asc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => serializeFirestoreData<Categoria>({ id: d.id, ...d.data() }));
+  } catch {
+    const snap = await getDocs(query(collection(db, CATEGORIAS_COLLECTION), where('activa', '==', true)));
+    return snap.docs
+      .map((d) => serializeFirestoreData<Categoria>({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  }
 }
 
 function normalizeFetchedPackage(paquete: Paquete, categorias: Categoria[]): Paquete {

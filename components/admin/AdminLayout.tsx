@@ -107,16 +107,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {/* Logo */}
           <div className="h-16 flex items-center justify-between px-6 border-b border-white/10">
             <Link href="/admin" className="flex items-center space-x-3">
-              <div className="w-10 h-10 flex items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10">
+              <div className="w-12 h-12 flex items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10">
                 {isRemoteUrl(logoSrc) ? (
-                  <img src={logoSrc} alt={logoAlt} className="w-8 h-8 object-contain" />
+                  <img src={logoSrc} alt={logoAlt} className="w-10 h-10 object-contain" />
                 ) : (
                   <Image
                     src={logoSrc}
                     alt={logoAlt}
-                    width={40}
-                    height={40}
-                    className="w-8 h-8 object-contain"
+                    width={48}
+                    height={48}
+                    className="w-10 h-10 object-contain"
                   />
                 )}
               </div>
@@ -143,7 +143,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   className={cn(
                     'relative group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all',
                     isActive
-                      ? 'bg-secondary text-secondary-foreground shadow'
+                      ? 'bg-white text-gray-950'
                       : 'text-gray-200 hover:bg-white/5'
                   )}
                   onClick={() => setSidebarOpen(false)}
@@ -151,11 +151,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   {isActive && (
                     <motion.span
                       layoutId="sidebar-rail"
-                      className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-full bg-white/90"
+                      className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-full bg-gray-950"
                       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                     />
                   )}
-                  <item.icon className={cn('h-5 w-5', isActive ? 'text-secondary-foreground' : 'text-gray-400 group-hover:text-gray-200')} />
+                  <item.icon className={cn('h-5 w-5', isActive ? 'text-gray-950' : 'text-gray-400 group-hover:text-gray-200')} />
                   <span className="font-medium">{item.name}</span>
                 </Link>
               );

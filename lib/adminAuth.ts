@@ -1,5 +1,3 @@
-import { ADMIN_EMAIL } from '@/lib/constants';
-
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 async function verifyFirebaseIdToken(idToken: string) {
@@ -33,10 +31,6 @@ export async function requireAdminToken(request: Request) {
   const user = await verifyFirebaseIdToken(token);
   if (!user) {
     throw new Error('Token inválido');
-  }
-  const email = String(user.email ?? '').trim().toLowerCase();
-  if (!email || email !== ADMIN_EMAIL) {
-    throw new Error('Acceso denegado');
   }
   return user;
 }

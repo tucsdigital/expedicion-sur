@@ -23,8 +23,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AuthPortalShell from '@/components/auth/AuthPortalShell';
-import { SessionManager } from '@/lib/auth/sessionManager';
-import { configureAuthPersistence, validateAdminDomain } from '@/lib/auth/authConfig';
+import { configureAuthPersistence } from '@/lib/auth/authConfig';
 import { ADMIN_EMAIL } from '@/lib/constants';
 import { normalizeDni, validatePasswordStrength } from '@/lib/auth/password-recovery';
 
@@ -33,7 +32,6 @@ type ViewState = 'login' | 'recover-dni' | 'recover-reset' | 'recover-success';
 export default function LoginPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const [sessionManager] = useState(() => SessionManager.getInstance());
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -41,11 +39,6 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [capsLock, setCapsLock] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [domainAllowed, setDomainAllowed] = useState(true);
-
-  const [isBlocked, setIsBlocked] = useState(false);
-  const [blockTimeRemaining, setBlockTimeRemaining] = useState(0);
-  const [lastAttemptTime, setLastAttemptTime] = useState(0);
 
   const [view, setView] = useState<ViewState>('login');
   const [dni, setDni] = useState('');
@@ -57,51 +50,12 @@ export default function LoginPage() {
   const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   useEffect(() => {
-    if (user && user.email?.toLowerCase() === ADMIN_EMAIL) {
+    if (user) {
       router.replace('/admin');
     }
   }, [router, user]);
 
-  useEffect(() => {
-    const allowed = validateAdminDomain();
-    setDomainAllowed(allowed);
-    if (!allowed) {
-      toast.error('Acceso no autorizado', {
-        description: 'Este dominio no está autorizado para el panel admin.',
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    const checkBlockStatus = () => {
-      if (!email) return;
-      const blocked = sessionManager.isUserBlocked(email);
-      setIsBlocked(blocked);
-      if (blocked) {
-        setBlockTimeRemaining(sessionManager.getBlockTimeRemaining(email));
-      }
-    };
-
-    checkBlockStatus();
-
-    let interval: NodeJS.Timeout | undefined;
-    if (isBlocked && blockTimeRemaining > 0) {
-      interval = setInterval(() => {
-        const remaining = sessionManager.getBlockTimeRemaining(email);
-        setBlockTimeRemaining(remaining);
-        if (remaining <= 0) {
-          setIsBlocked(false);
-          setBlockTimeRemaining(0);
-        }
-      }, 1000);
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [blockTimeRemaining, email, isBlocked, sessionManager]);
-
-  const canInteract = domainAllowed && !isBlocked && !loading;
+  const canInteract = !loading;
   const passwordHint = useMemo(() => validatePasswordStrength(newPassword), [newPassword]);
 
   const resetRecoveryState = () => {
@@ -116,28 +70,6 @@ export default function LoginPage() {
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!domainAllowed) {
-      toast.error('Dominio no autorizado');
-      return;
-    }
-
-    if (isBlocked) {
-      const minutes = Math.ceil(blockTimeRemaining / 60000);
-      toast.error('Cuenta temporalmente bloqueada', {
-        description: `Intentá de nuevo en ${minutes} minuto(s).`,
-      });
-      return;
-    }
-
-    const now = Date.now();
-    if (lastAttemptTime > 0 && now - lastAttemptTime < 3000) {
-      toast.warning('Esperá un momento', {
-        description: 'Debes esperar unos segundos entre intentos.',
-      });
-      return;
-    }
-
-    setLastAttemptTime(now);
     setLoading(true);
 
     try {
@@ -145,17 +77,11 @@ export default function LoginPage() {
       await configureAuthPersistence(auth, rememberMe);
       const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
 
-      sessionManager.recordLoginAttempt(email, true);
-      sessionManager.clearLoginAttempts(email);
-      sessionManager.createSession(userCredential.user, rememberMe);
-
       toast.success('Sesión iniciada', {
         description: 'Accediste correctamente al panel administrador.',
       });
       router.push('/admin');
     } catch (error) {
-      sessionManager.recordLoginAttempt(email, false);
-
       let description = 'Verificá tus credenciales.';
       if (error && typeof error === 'object' && 'code' in error) {
         switch ((error as { code: string }).code) {
@@ -179,16 +105,6 @@ export default function LoginPage() {
       }
 
       toast.error('Error al iniciar sesión', { description });
-
-      const nowBlocked = sessionManager.isUserBlocked(email);
-      if (nowBlocked) {
-        const remaining = sessionManager.getBlockTimeRemaining(email);
-        setIsBlocked(true);
-        setBlockTimeRemaining(remaining);
-        toast.warning('Cuenta bloqueada temporalmente', {
-          description: `Intentá nuevamente en ${Math.ceil(remaining / 60000)} minuto(s).`,
-        });
-      }
     } finally {
       setLoading(false);
     }
@@ -277,18 +193,6 @@ export default function LoginPage() {
 
   const renderLogin = () => (
     <form onSubmit={handleLogin} className="space-y-5">
-      {isBlocked ? (
-        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <p className="font-semibold">Acceso bloqueado temporalmente</p>
-            <p className="mt-1 text-amber-800">
-              Esperá {Math.max(1, Math.ceil(blockTimeRemaining / 60000))} minuto(s) antes de volver a intentar.
-            </p>
-          </div>
-        </div>
-      ) : null}
-
       <div className="space-y-2">
         <Label htmlFor="email" className="text-sm font-semibold text-[#24335B]">
           Email
@@ -386,7 +290,7 @@ export default function LoginPage() {
             value={dni}
             onChange={(event) => setDni(normalizeDni(event.target.value))}
             placeholder="Ingresá tu número de DNI"
-            disabled={recoveryLoading || !domainAllowed}
+            disabled={recoveryLoading}
             className="h-12 rounded-2xl border-[#D6DEEC] bg-white px-11 text-[15px] shadow-none"
           />
         </div>
@@ -394,7 +298,7 @@ export default function LoginPage() {
 
       <Button
         type="submit"
-        disabled={recoveryLoading || !domainAllowed}
+        disabled={recoveryLoading}
         className="h-12 w-full rounded-2xl bg-[linear-gradient(135deg,#0F1F52_0%,#0B2F7D_100%)] text-sm font-semibold text-white shadow-[0_14px_30px_rgba(15,31,82,0.26)] transition hover:opacity-95"
       >
         {recoveryLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

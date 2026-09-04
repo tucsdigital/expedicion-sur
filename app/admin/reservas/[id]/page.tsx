@@ -856,7 +856,7 @@ export default function ReservaDetailPage() {
                 <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Pasajeros</p>
                 <div className="mt-1 space-y-0.5">
                   <p className="text-sm font-medium text-gray-900">
-                    Pasajero 1: {reserva.customerName || 'Sin nombre'} <span className="text-xs text-gray-500">(Titular)</span>
+                    Pasajero 1: {reserva.customerName || 'Sin nombre'}
                   </p>
                   {passengerDetails.map((traveler: any, index: number) => {
                     const fullName = `${String(traveler?.firstName ?? '').trim()} ${String(traveler?.lastName ?? '').trim()}`.trim();

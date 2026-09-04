@@ -412,7 +412,7 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                     <CardContent>
                       <form onSubmit={handleSubmitForm} className="space-y-5" noValidate>
                         <div className="text-sm font-extrabold uppercase tracking-[0.1em] text-[#0B2240]">
-                          Pasajero 1 <span className="font-semibold normal-case text-[#5A7898]">(Titular)</span>
+                          Pasajero 1
                         </div>
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-1.5">
@@ -715,7 +715,6 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                     {Array.from({ length: travelerCount }).map((_, index) => (
                       <div key={index}>
                         Pasajero {index + 1}
-                        {index === 0 ? ' (Titular)' : ''}
                       </div>
                     ))}
                   </div>

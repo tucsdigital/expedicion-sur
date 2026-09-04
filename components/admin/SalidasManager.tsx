@@ -1,368 +1,225 @@
 'use client';
 
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { FormattedAmountInput } from '@/components/ui/formatted-amount-input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar, Pencil, Trash2, Plus, X, Check } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { CalendarDays, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import type { Salida } from '@/types';
+import { Button } from '@/components/ui/button';
+import { FormattedAmountInput } from '@/components/ui/formatted-amount-input';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 
-interface SalidasManagerProps {
+type Props = {
   salidas: Salida[];
   onSalidasChange: (salidas: Salida[]) => void;
+};
+
+type Draft = Omit<Salida, 'id'>;
+
+const EMPTY_DRAFT: Draft = {
+  fecha: '',
+  fechaVuelta: '',
+  ciudadSalida: '',
+  precio: 0,
+  moneda: 'ARS',
+  cupo: undefined,
+  observaciones: '',
+};
+
+function toIso(date: Date) {
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 }
 
-export default function SalidasManager({ salidas, onSalidasChange }: SalidasManagerProps) {
-  const [isAdding, setIsAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  
-  const [formData, setFormData] = useState<Omit<Salida, 'id'>>({
-    fecha: '',
-    fechaVuelta: '',
-    ciudadSalida: '',
-    precio: 0,
-    moneda: 'ARS',
-    cupo: undefined,
-    observaciones: '',
-  });
+function parseIso(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}
 
-  const resetForm = () => {
-    setFormData({
-      fecha: '',
-      fechaVuelta: '',
-      ciudadSalida: '',
-      precio: 0,
-      moneda: 'ARS',
-      cupo: undefined,
-      observaciones: '',
+function formatDate(value: string, long = false) {
+  const date = parseIso(value);
+  if (!value || Number.isNaN(date.getTime())) return 'Sin fecha';
+  return date.toLocaleDateString('es-AR', long ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } : { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function makeSalida(draft: Draft, fecha: string, id?: string): Salida {
+  return {
+    id: id || `salida-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    fecha,
+    fechaVuelta: draft.fechaVuelta?.trim() || fecha,
+    ciudadSalida: draft.ciudadSalida.trim(),
+    precio: Number(draft.precio) || 0,
+    moneda: draft.moneda,
+    ...(draft.cupo && draft.cupo > 0 ? { cupo: Math.floor(draft.cupo) } : {}),
+    observaciones: draft.observaciones?.trim() || '',
+  };
+}
+
+export default function SalidasManager({ salidas, onSalidasChange }: Props) {
+  const today = toIso(new Date());
+  const [month, setMonth] = useState(() => {
+    const date = new Date();
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  });
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const [draft, setDraft] = useState<Draft>({ ...EMPTY_DRAFT });
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const datesByIso = useMemo(() => new Set(salidas.map((salida) => salida.fecha)), [salidas]);
+  const sortedSalidas = useMemo(() => [...salidas].sort((a, b) => a.fecha.localeCompare(b.fecha)), [salidas]);
+  const calendarDays = useMemo(() => {
+    const first = new Date(month.getFullYear(), month.getMonth(), 1);
+    const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+    const offset = (first.getDay() + 6) % 7;
+    return Array.from({ length: offset + last.getDate() }, (_, index) => {
+      if (index < offset) return null;
+      return new Date(month.getFullYear(), month.getMonth(), index - offset + 1);
     });
+  }, [month]);
+
+  const resetEditor = () => {
+    setDraft({ ...EMPTY_DRAFT });
+    setEditingId(null);
   };
 
-  const handleAdd = () => {
-    if (!formData.fecha || !formData.fechaVuelta || formData.precio <= 0) {
-      alert('La fecha de ida, la fecha de vuelta y el precio son obligatorios');
+  const selectDate = (value: string) => {
+    if (!rangeStart || rangeEnd) {
+      setRangeStart(value);
+      setRangeEnd('');
+    } else if (value < rangeStart) {
+      setRangeEnd(rangeStart);
+      setRangeStart(value);
+    } else {
+      setRangeEnd(value);
+    }
+  };
+
+  const addRange = () => {
+    if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) {
+      toast.error('Elegí un rango de fechas válido.');
+      return;
+    }
+    if (draft.precio <= 0) {
+      toast.error('Cargá el precio antes de agregar las fechas.');
       return;
     }
 
-    // Sanitizar datos antes de guardar
-    const sanitizedData: Partial<Salida> = {
-      fecha: formData.fecha.trim(),
-      fechaVuelta: formData.fechaVuelta.trim(),
-      ciudadSalida: formData.ciudadSalida.trim(),
-      precio: Number(formData.precio) || 0,
-      moneda: formData.moneda,
-      observaciones: formData.observaciones?.trim() || '',
-    };
-    
-    // Solo agregar cupo si tiene un valor válido
-    if (formData.cupo && formData.cupo > 0) {
-      sanitizedData.cupo = Number(formData.cupo);
+    const next = [...salidas];
+    const cursor = parseIso(rangeStart);
+    const end = parseIso(rangeEnd);
+    let added = 0;
+    while (cursor <= end) {
+      const date = toIso(cursor);
+      if (date >= today && !datesByIso.has(date)) {
+        next.push(makeSalida(draft, date));
+        added += 1;
+      }
+      cursor.setDate(cursor.getDate() + 1);
     }
-
-    const newSalida: Salida = {
-      id: `salida-${Date.now()}`,
-      ...sanitizedData,
-    } as Salida;
-
-    onSalidasChange([...salidas, newSalida]);
-    resetForm();
-    setIsAdding(false);
+    if (!added) {
+      toast.info('Todas las fechas del rango ya están cargadas o quedaron atrás.');
+      return;
+    }
+    onSalidasChange(next);
+    setRangeStart('');
+    setRangeEnd('');
+    toast.success(`${added} fecha${added === 1 ? '' : 's'} agregada${added === 1 ? '' : 's'}.`);
   };
 
-  const handleEdit = (salida: Salida) => {
+  const editSalida = (salida: Salida) => {
     setEditingId(salida.id);
-    setFormData({
+    setDraft({
       fecha: salida.fecha,
-      fechaVuelta: salida.fechaVuelta || '',
-      ciudadSalida: salida.ciudadSalida,
-      precio: salida.precio,
+      fechaVuelta: salida.fechaVuelta || salida.fecha,
+      ciudadSalida: salida.ciudadSalida || '',
+      precio: Number(salida.precio) || 0,
       moneda: salida.moneda,
       cupo: salida.cupo,
       observaciones: salida.observaciones || '',
     });
   };
 
-  const handleSaveEdit = () => {
-    if (!formData.fecha || !formData.fechaVuelta || formData.precio <= 0) {
-      alert('La fecha de ida, la fecha de vuelta y el precio son obligatorios');
+  const saveEdit = () => {
+    if (!editingId || !draft.fecha || !draft.fechaVuelta || draft.precio <= 0) {
+      toast.error('Completá ida, vuelta y un precio válido.');
       return;
     }
-
-    // Sanitizar datos antes de guardar
-    const sanitizedData: Partial<Salida> = {
-      fecha: formData.fecha.trim(),
-      fechaVuelta: formData.fechaVuelta.trim(),
-      ciudadSalida: formData.ciudadSalida.trim(),
-      precio: Number(formData.precio) || 0,
-      moneda: formData.moneda,
-      observaciones: formData.observaciones?.trim() || '',
-    };
-    
-    // Solo agregar cupo si tiene un valor válido
-    if (formData.cupo && formData.cupo > 0) {
-      sanitizedData.cupo = Number(formData.cupo);
+    if (draft.fechaVuelta < draft.fecha) {
+      toast.error('La vuelta no puede ser anterior a la ida.');
+      return;
     }
-
-    const updatedSalidas = salidas.map((s) =>
-      s.id === editingId
-        ? { ...s, ...sanitizedData } as Salida
-        : s
-    );
-
-    onSalidasChange(updatedSalidas);
-    resetForm();
-    setEditingId(null);
-  };
-
-  const handleCancelEdit = () => {
-    resetForm();
-    setEditingId(null);
-    setIsAdding(false);
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm('¿Estás seguro de eliminar esta salida?')) {
-      onSalidasChange(salidas.filter((s) => s.id !== id));
+    if (salidas.some((salida) => salida.id !== editingId && salida.fecha === draft.fecha)) {
+      toast.error('Ya existe una salida para esa fecha.');
+      return;
     }
+    onSalidasChange(salidas.map((salida) => salida.id === editingId ? makeSalida(draft, draft.fecha, editingId) : salida));
+    resetEditor();
+    toast.success('Salida actualizada.');
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString + 'T00:00:00');
-    return date.toLocaleDateString('es-AR', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
+  const removeSalida = (id: string) => {
+    onSalidasChange(salidas.filter((salida) => salida.id !== id));
+    if (editingId === id) resetEditor();
+    toast.success('Salida eliminada.');
   };
-
-  // Ordenar salidas por fecha
-  const sortedSalidas = [...salidas].sort((a, b) => 
-    new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
-  );
 
   return (
-    <div className="space-y-4">
-      {/* Botón para agregar nueva salida */}
-      {!isAdding && !editingId && (
-        <Button
-          type="button"
-          onClick={() => setIsAdding(true)}
-          variant="outline"
-          className="w-full"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Agregar Salida
-        </Button>
-      )}
-
-      {/* Formulario de agregar/editar */}
-      {(isAdding || editingId) && (
-        <div className="border border-gray-300 rounded-lg p-4 space-y-4 bg-gray-50">
-          <h4 className="font-semibold text-base text-gray-900">
-            {editingId ? 'Editar Salida' : 'Nueva Salida'}
-          </h4>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="fecha" className="text-sm">Fecha de Ida *</Label>
-              <Input
-                id="fecha"
-                type="date"
-                value={formData.fecha}
-                onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="fechaVuelta" className="text-sm">Fecha de Vuelta *</Label>
-              <Input
-                id="fechaVuelta"
-                type="date"
-                value={formData.fechaVuelta}
-                onChange={(e) => setFormData({ ...formData, fechaVuelta: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="ciudadSalida" className="text-sm">Ciudad de Salida</Label>
-              <Input
-                id="ciudadSalida"
-                value={formData.ciudadSalida}
-                onChange={(e) => setFormData({ ...formData, ciudadSalida: e.target.value })}
-                placeholder="Ej: Buenos Aires"
-                className="mt-1"
-              />
-            </div>
-
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <Label htmlFor="precio" className="text-sm">Precio *</Label>
-              <FormattedAmountInput
-                id="precio"
-                value={formData.precio}
-                onChange={(v) => setFormData({ ...formData, precio: v })}
-                placeholder="0"
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="moneda" className="text-sm">Moneda *</Label>
-              <Select
-                value={formData.moneda}
-                onValueChange={(value: 'USD' | 'ARS' | 'EUR') => setFormData({ ...formData, moneda: value })}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ARS">ARS (Pesos Argentinos)</SelectItem>
-                  <SelectItem value="USD">USD (Dólares)</SelectItem>
-                  <SelectItem value="EUR">EUR (Euros)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="cupo" className="text-sm">Cupo (Opcional)</Label>
-              <Input
-                id="cupo"
-                type="number"
-                value={formData.cupo || ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setFormData({ 
-                    ...formData, 
-                    cupo: value && !isNaN(Number(value)) && Number(value) > 0 ? Number(value) : undefined 
-                  });
-                }}
-                placeholder="Ej: 20"
-                className="mt-1"
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="observaciones" className="text-sm">Observaciones (Opcional)</Label>
-            <Textarea
-              id="observaciones"
-              value={formData.observaciones}
-              onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-              placeholder="Ej: Incluye vuelos desde Córdoba"
-              rows={2}
-              className="mt-1"
-            />
-          </div>
-
-          <div className="flex gap-2 justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleCancelEdit}
-            >
-              <X className="mr-1 h-4 w-4" />
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={editingId ? handleSaveEdit : handleAdd}
-              className="bg-gray-900 hover:bg-gray-800 text-white"
-            >
-              <Check className="mr-1 h-4 w-4" />
-              {editingId ? 'Guardar' : 'Agregar'}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Lista de salidas */}
-      {sortedSalidas.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-base font-medium text-gray-700">
-            Salidas programadas ({sortedSalidas.length})
-          </p>
-          {sortedSalidas.map((salida) => (
-            <div
-              key={salida.id}
-              className="border border-gray-200 rounded-lg p-3 bg-white hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <Calendar className="h-4 w-4 text-blue-600" />
-                    <span className="font-semibold text-gray-900">
-                      {formatDate(salida.fecha)}
-                      {salida.fechaVuelta && (
-                        <span className="text-gray-600 font-normal"> → {formatDate(salida.fechaVuelta)}</span>
-                      )}
-                    </span>
-                    {salida.ciudadSalida && (
-                      <span className="text-base text-gray-600">
-                        desde {salida.ciudadSalida}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="flex flex-wrap items-center gap-3 text-base">
-                    <span className="font-bold text-green-700">
-                      {salida.moneda} ${salida.precio.toLocaleString('es-AR')}
-                    </span>
-                    {salida.cupo && (
-                      <span className="text-gray-600">
-                        Cupo: {salida.cupo} personas
-                      </span>
-                    )}
-                  </div>
-
-                  {salida.observaciones && (
-                    <p className="text-sm text-gray-600 mt-2">
-                      {salida.observaciones}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-1 shrink-0">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleEdit(salida)}
-                    disabled={isAdding || editingId !== null}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(salida.id)}
-                    disabled={isAdding || editingId !== null}
-                  >
-                    <Trash2 className="h-4 w-4 text-red-600" />
-                  </Button>
-                </div>
+    <div className="space-y-5">
+      {!editingId ? (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Seleccioná las fechas</p>
+                <p className="mt-1 text-xs text-gray-500">Un clic para una fecha, dos para completar un rango.</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="icon" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Mes anterior"><ChevronLeft className="h-4 w-4" /></Button>
+                <span className="min-w-32 text-center text-sm font-medium capitalize text-gray-700">{month.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}</span>
+                <Button type="button" variant="ghost" size="icon" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Mes siguiente"><ChevronRight className="h-4 w-4" /></Button>
               </div>
             </div>
-          ))}
+            <div className="mt-4 grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-gray-400">{['lu', 'ma', 'mi', 'ju', 'vi', 'sá', 'do'].map((day) => <span key={day}>{day}</span>)}</div>
+            <div className="mt-2 grid grid-cols-7 gap-1">
+              {calendarDays.map((date, index) => {
+                if (!date) return <span key={`empty-${index}`} className="aspect-square" />;
+                const iso = toIso(date);
+                const past = iso < today;
+                const selected = iso === rangeStart || iso === rangeEnd;
+                const inRange = Boolean(rangeStart && rangeEnd && iso >= rangeStart && iso <= rangeEnd);
+                const loaded = datesByIso.has(iso);
+                return <button key={iso} type="button" disabled={past} onClick={() => selectDate(iso)} className={`relative aspect-square rounded-md text-sm transition-colors ${past ? 'cursor-not-allowed text-gray-300' : 'text-gray-700 hover:bg-gray-100'} ${inRange ? 'bg-gray-100' : ''} ${selected ? 'bg-gray-900 text-white hover:bg-gray-800' : ''}`}>{date.getDate()}{loaded ? <span className={`absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full ${selected ? 'bg-white' : 'bg-[#0f766e]'}`} /> : null}</button>;
+              })}
+            </div>
+            <div className="mt-4 flex gap-4 text-xs text-gray-500"><span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[#0f766e]" />Ya cargada</span><span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-gray-300" />No disponible</span></div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex items-center justify-between"><div><p className="text-sm font-semibold text-gray-900">Agregar fechas</p><p className="mt-1 text-xs text-gray-500">Los datos se aplican al rango elegido.</p></div>{rangeStart ? <button type="button" onClick={() => { setRangeStart(''); setRangeEnd(''); }} className="text-gray-400 hover:text-gray-700" aria-label="Limpiar selección"><X className="h-4 w-4" /></button> : null}</div>
+            <div className="mt-4 space-y-3">
+              <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="salidas-desde" className="text-xs">Desde</Label><Input id="salidas-desde" type="date" min={today} value={rangeStart} onChange={(event) => setRangeStart(event.target.value)} className="mt-1 bg-white" /></div><div><Label htmlFor="salidas-hasta" className="text-xs">Hasta</Label><Input id="salidas-hasta" type="date" min={rangeStart || today} value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)} className="mt-1 bg-white" /></div></div>
+              <div><Label htmlFor="salidas-precio" className="text-xs">Precio por persona</Label><FormattedAmountInput id="salidas-precio" value={draft.precio} onChange={(value) => setDraft((prev) => ({ ...prev, precio: value }))} className="mt-1 bg-white" /></div>
+              <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="salidas-moneda" className="text-xs">Moneda</Label><Select value={draft.moneda} onValueChange={(value: Draft['moneda']) => setDraft((prev) => ({ ...prev, moneda: value }))}><SelectTrigger id="salidas-moneda" className="mt-1 bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ARS">ARS</SelectItem><SelectItem value="USD">USD</SelectItem><SelectItem value="EUR">EUR</SelectItem></SelectContent></Select></div><div><Label htmlFor="salidas-cupo" className="text-xs">Cupo</Label><Input id="salidas-cupo" type="number" min={1} value={draft.cupo || ''} onChange={(event) => setDraft((prev) => ({ ...prev, cupo: event.target.value ? Number(event.target.value) : undefined }))} className="mt-1 bg-white" placeholder="Opcional" /></div></div>
+              <div><Label htmlFor="salidas-ciudad" className="text-xs">Ciudad de salida</Label><Input id="salidas-ciudad" value={draft.ciudadSalida} onChange={(event) => setDraft((prev) => ({ ...prev, ciudadSalida: event.target.value }))} className="mt-1 bg-white" placeholder="Opcional" /></div>
+              <Button type="button" onClick={addRange} className="w-full"><Plus className="mr-2 h-4 w-4" />Agregar fechas</Button>
+            </div>
+          </div>
         </div>
       ) : (
-        <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg bg-gray-50">
-          <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-          <p className="text-base text-gray-600">No hay salidas programadas</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Agrega fechas de salida con sus respectivos precios
-          </p>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center justify-between"><p className="text-sm font-semibold text-gray-900">Editar salida · {formatDate(draft.fecha, true)}</p><Button type="button" variant="ghost" size="icon" onClick={resetEditor} aria-label="Cancelar edición"><X className="h-4 w-4" /></Button></div>
+          <div className="mt-4 grid gap-3 md:grid-cols-4"><div><Label htmlFor="edit-fecha" className="text-xs">Ida</Label><Input id="edit-fecha" type="date" min={today} value={draft.fecha} onChange={(event) => setDraft((prev) => ({ ...prev, fecha: event.target.value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-vuelta" className="text-xs">Vuelta</Label><Input id="edit-vuelta" type="date" min={draft.fecha || today} value={draft.fechaVuelta} onChange={(event) => setDraft((prev) => ({ ...prev, fechaVuelta: event.target.value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-precio" className="text-xs">Precio</Label><FormattedAmountInput id="edit-precio" value={draft.precio} onChange={(value) => setDraft((prev) => ({ ...prev, precio: value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-cupo" className="text-xs">Cupo</Label><Input id="edit-cupo" type="number" min={1} value={draft.cupo || ''} onChange={(event) => setDraft((prev) => ({ ...prev, cupo: event.target.value ? Number(event.target.value) : undefined }))} className="mt-1 bg-white" /></div></div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2"><div><Label htmlFor="edit-ciudad" className="text-xs">Ciudad de salida</Label><Input id="edit-ciudad" value={draft.ciudadSalida} onChange={(event) => setDraft((prev) => ({ ...prev, ciudadSalida: event.target.value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-observaciones" className="text-xs">Observaciones</Label><Textarea id="edit-observaciones" value={draft.observaciones} onChange={(event) => setDraft((prev) => ({ ...prev, observaciones: event.target.value }))} className="mt-1 bg-white" rows={1} /></div></div>
+          <div className="mt-3 flex justify-end"><Button type="button" onClick={saveEdit}>Guardar cambios</Button></div>
         </div>
       )}
+
+      <div className="border-t border-gray-200 pt-4">
+        <div className="flex items-center justify-between"><p className="text-sm font-semibold text-gray-900">Salidas configuradas</p><span className="text-xs text-gray-500">{sortedSalidas.length} {sortedSalidas.length === 1 ? 'fecha' : 'fechas'}</span></div>
+        {sortedSalidas.length === 0 ? <div className="mt-3 flex items-center gap-3 rounded-lg border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500"><CalendarDays className="h-5 w-5 text-gray-400" />Todavía no hay fechas cargadas.</div> : <div className="mt-3 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">{sortedSalidas.map((salida) => <div key={salida.id} className="flex items-center justify-between gap-3 px-3 py-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-900"><span>{formatDate(salida.fecha, true)}</span>{salida.fechaVuelta && salida.fechaVuelta !== salida.fecha ? <span className="text-gray-400">hasta {formatDate(salida.fechaVuelta)}</span> : null}</div><div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500"><span>{salida.moneda} {Number(salida.precio || 0).toLocaleString('es-AR')}</span>{salida.cupo ? <span>{salida.cupo} cupos</span> : null}{salida.ciudadSalida ? <span>{salida.ciudadSalida}</span> : null}</div></div><div className="flex shrink-0 gap-1"><Button type="button" variant="ghost" size="icon" onClick={() => editSalida(salida)} disabled={Boolean(editingId)} aria-label="Editar salida"><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" onClick={() => removeSalida(salida.id)} disabled={Boolean(editingId)} aria-label="Eliminar salida"><Trash2 className="h-4 w-4 text-red-500" /></Button></div></div>)}</div>}
+      </div>
     </div>
   );
 }

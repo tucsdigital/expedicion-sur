@@ -39,11 +39,11 @@ export function filterAvailabilityToBookingWindow(
   entries: BookingAvailabilityItem[],
   baseDate = new Date()
 ) {
-  const monthKeys = new Set(buildBookingWindowMonths(baseDate).map((item) => `${item.year}-${item.month}`));
+  const today = toIsoDate(baseDate);
   return entries.filter((entry) => {
     const parsed = new Date(`${entry.date}T00:00:00`);
     if (Number.isNaN(parsed.getTime())) return false;
-    return monthKeys.has(`${parsed.getFullYear()}-${parsed.getMonth()}`);
+    return entry.date >= today;
   });
 }
 

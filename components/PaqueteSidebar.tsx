@@ -3,11 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { Paquete } from '@/types';
-import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, Clock, Headphones, MapPin, ShieldCheck, Users } from 'lucide-react';
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, Clock, Headphones, MapPin, ShieldCheck, Users, X } from 'lucide-react';
 import { getWhatsAppLinkForPackage } from '@/lib/utils/whatsapp';
 import {
   buildBookingCalendarMonth,
-  buildBookingWindowMonths,
   filterAvailabilityToBookingWindow,
   getMaxSelectablePeople,
   type BookingAvailabilityItem,
@@ -111,6 +110,8 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
     [selectedDate, visibleBookingDates]
   );
 
+  const getSalidaForDate = (date: string) => paquete.salidas?.find((salida) => salida.fecha === date) ?? null;
+
   const maxSelectablePeopleForDate = getMaxSelectablePeople(selectedAvailability?.available ?? 0, maxPeoplePerBooking);
 
   useEffect(() => {
@@ -146,7 +147,13 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
     selectedDate || 'sin-fecha'
   )}&people=${encodeURIComponent(String(people))}&pax=${encodeURIComponent(JSON.stringify(pax))}`;
 
-  const months = buildBookingWindowMonths(new Date());
+  const months = useMemo(() => {
+    const monthKeys = new Set(visibleBookingDates.map((item) => item.date.slice(0, 7)));
+    return [...monthKeys].sort().map((key) => {
+      const [year, month] = key.split('-').map(Number);
+      return { year, month: month - 1 };
+    });
+  }, [visibleBookingDates]);
 
   return (
     <div className="space-y-4">
@@ -238,16 +245,6 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                     <div>
                       <div className="text-base font-extrabold text-black">Cantidad de personas</div>
                     </div>
-                    {visibleBookingDates.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setStep('calendar')}
-                        className="inline-flex items-center gap-1 text-sm font-semibold text-success transition hover:text-success-strong"
-                      >
-                        Elegir fecha
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    ) : null}
                   </div>
 
                   <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
@@ -320,7 +317,16 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                       </div>
                     </div>
 
-                    {visibleBookingDates.length === 0 ? (
+                    {visibleBookingDates.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setStep('calendar')}
+                        className="mt-4 flex h-11 w-full items-center justify-center rounded-2xl bg-black font-extrabold text-white transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/35 focus-visible:ring-offset-2 active:bg-neutral-900"
+                      >
+                        Continuar
+                        <ChevronRight className="ml-1 h-4 w-4" />
+                      </button>
+                    ) : (
                       <>
                         <Link
                           href={bookingHref}
@@ -330,14 +336,15 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                           <ChevronRight className="ml-1 h-4 w-4" />
                         </Link>
                       </>
-                    ) : null}
+                    )}
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="fixed inset-0 z-50 flex min-h-full items-center justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-[2px]">
+                  <div className="my-auto w-full max-w-lg rounded-3xl bg-white p-5 shadow-2xl">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-base font-extrabold text-black">Elegí tu fecha</div>
+                      <div className="text-lg font-extrabold text-black">Elegí tu fecha</div>
                       <div className="mt-1 text-sm text-slate-600">
                         Disponibilidad para <span className="font-extrabold text-black">{people}</span>{' '}
                         {people === 1 ? 'persona' : 'personas'}.
@@ -346,10 +353,10 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                     <button
                       type="button"
                       onClick={() => setStep('people')}
-                      className="inline-flex items-center gap-1 text-sm font-semibold text-success transition hover:text-success-strong"
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-gray-100 hover:text-black"
+                      aria-label="Cerrar calendario"
                     >
-                      <ChevronLeft className="h-4 w-4" />
-                      Cambiar personas
+                      <X className="h-5 w-5" />
                     </button>
                   </div>
 
@@ -429,6 +436,8 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                         <div className="mt-1 text-sm font-bold text-black">{formatDateLabel(selectedDate)}</div>
                         {selectedAvailability ? (
                           <div className="mt-2 text-xs text-slate-600">
+                            Precio por persona: <span className="font-bold text-black">{getSalidaForDate(selectedDate)?.moneda || paquete.moneda || 'ARS'} ${Number(getSalidaForDate(selectedDate)?.precio ?? paquete.precio ?? 0).toLocaleString('es-AR')}</span>
+                            <br />
                             Cupos disponibles: <span className="font-bold text-green-700">{selectedAvailability.available}</span>
                             {selectedAvailability.capacity > 0 ? ` de ${selectedAvailability.capacity}` : ''}
                           </div>
@@ -444,6 +453,7 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                       </Link>
                     </>
                   ) : null}
+                  </div>
                 </div>
               )}
             </div>

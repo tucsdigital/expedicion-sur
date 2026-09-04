@@ -21,11 +21,21 @@ const NAME_MIN_LENGTH = 2;
 const PHONE_MIN_LENGTH = 8;
 const CHECKOUT_STORAGE_PREFIX = 'checkout_form_';
 
+type CheckoutPricing = {
+  unitAmountAdults: number;
+  unitAmountMinors: number;
+  baseSubtotalAmount: number;
+  extrasTotalAmount: number;
+  subtotalAmount: number;
+  currency: string;
+};
+
 type CheckoutClientProps = {
   experience: Experience;
   date: string;
   people: number;
   pax?: PeopleBreakdown;
+  pricing?: CheckoutPricing;
   initialError?: string | null;
 };
 
@@ -41,6 +51,30 @@ type CheckoutFormState = {
   customerNationality: string;
   customerDietaryRestrictions: string;
   customerComments: string;
+};
+
+type TravelerFormState = {
+  firstName: string;
+  lastName: string;
+  age: string;
+  birthDate: string;
+  phone: string;
+  document: string;
+};
+
+const EMPTY_TRAVELER: TravelerFormState = {
+  firstName: '',
+  lastName: '',
+  age: '',
+  birthDate: '',
+  phone: '',
+  document: '',
+};
+
+const PEOPLE_CATEGORY_LABELS: Record<string, string> = {
+  adults: 'Adultos',
+  minors: 'Menores',
+  children: 'Niños',
 };
 
 function getSiteUrl() {
@@ -61,12 +95,13 @@ function formatAmount(amount: number, currency: string) {
   }).format(amount)} ${normalized}`;
 }
 
-export default function CheckoutClient({ experience, date, people, pax, initialError }: CheckoutClientProps) {
+export default function CheckoutClient({ experience, date, people, pax, pricing, initialError }: CheckoutClientProps) {
   const travelerCount = Math.max(1, people);
   const storageKey = getCheckoutStorageKey(experience.slug, date, travelerCount);
   const [step, setStep] = useState<CheckoutStep>('form');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError ?? null);
+  const [passengers, setPassengers] = useState<TravelerFormState[]>([]);
   const [referralCode, setReferralCode] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
   const [touched, setTouched] = useState({
@@ -92,16 +127,9 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
   });
 
   const bookingConfig = experience.bookingConfig as any;
-  const unitPrice =
-    typeof bookingConfig?.depositAmount === 'number'
-      ? bookingConfig.depositAmount
-      : typeof (experience as any)?.price === 'number'
-        ? Number((experience as any).price) || 0
-        : 0;
-  const directAdministrativeFeeAmount =
-    Math.max(0, Number((experience as any)?.gastosAdministrativos ?? 0) || 0) * 100;
-  const currency = bookingConfig?.currency === 'usd' || bookingConfig?.currency === 'brl' ? bookingConfig.currency : 'ars';
-  const total = unitPrice * travelerCount + directAdministrativeFeeAmount;
+  const currency = pricing?.currency ?? (bookingConfig?.currency === 'usd' || bookingConfig?.currency === 'brl' ? bookingConfig.currency : 'ars');
+  const total = pricing?.subtotalAmount ?? 0;
+  const extrasTotalAmount = pricing?.extrasTotalAmount ?? 0;
   const dateLabel =
     date && date !== 'sin-fecha'
       ? new Date(`${date}T12:00:00`).toLocaleDateString('es-AR', {
@@ -113,13 +141,21 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
       : 'A coordinar';
 
   const checkoutExtras = useMemo(() => {
-    if (directAdministrativeFeeAmount <= 0) {
+    if (extrasTotalAmount <= 0) {
       return { items: [] as Array<{ label: string; amount: number }> };
     }
     return {
-      items: [{ label: 'Gastos administrativos', amount: directAdministrativeFeeAmount }],
+      items: [{ label: 'Gastos administrativos', amount: extrasTotalAmount }],
     };
-  }, [directAdministrativeFeeAmount]);
+  }, [extrasTotalAmount]);
+
+  const paxSummary = useMemo(
+    () =>
+      Object.entries(pax ?? {})
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => ({ key, label: PEOPLE_CATEGORY_LABELS[key] ?? key, value: Number(value) })),
+    [pax]
+  );
 
   const steps = useMemo(
     () => [
@@ -172,6 +208,14 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
     }
   }, []);
 
+  useEffect(() => {
+    const needed = Math.max(0, travelerCount - 1);
+    setPassengers((prev) => {
+      if (prev.length === needed) return prev;
+      return Array.from({ length: needed }, (_, index) => prev[index] ?? { ...EMPTY_TRAVELER });
+    });
+  }, [travelerCount]);
+
   const firstNameError = touched.firstName && form.customerFirstName.trim().length < NAME_MIN_LENGTH;
   const lastNameError = touched.lastName && form.customerLastName.trim().length < NAME_MIN_LENGTH;
   const emailError = touched.email && (!form.customerEmail.trim() || !EMAIL_REGEX.test(form.customerEmail.trim()));
@@ -179,6 +223,28 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
   const documentError = touched.document && !form.customerDocument.trim();
   const birthDateError = touched.birthDate && !DATE_REGEX.test(form.customerBirthDate.trim());
   const nationalityError = touched.nationality && !form.customerNationality.trim();
+  const [passengersTouched, setPassengersTouched] = useState(false);
+
+  const passengerErrors = useMemo(
+    () =>
+      passengers.map((traveler) => ({
+        firstName: traveler.firstName.trim().length < NAME_MIN_LENGTH,
+        lastName: traveler.lastName.trim().length < NAME_MIN_LENGTH,
+        age: !Number.isFinite(Number(traveler.age)) || Number(traveler.age) < 0 || Number(traveler.age) > 120 || !traveler.age.trim(),
+        birthDate: !DATE_REGEX.test(traveler.birthDate.trim()),
+        phone: traveler.phone.trim().length < PHONE_MIN_LENGTH,
+        document: !traveler.document.trim(),
+      })),
+    [passengers]
+  );
+
+  const passengersValid = passengerErrors.every(
+    (item) => !item.firstName && !item.lastName && !item.age && !item.birthDate && !item.phone && !item.document
+  );
+
+  const updatePassenger = (index: number, patch: Partial<TravelerFormState>) => {
+    setPassengers((current) => current.map((traveler, i) => (i === index ? { ...traveler, ...patch } : traveler)));
+  };
 
   const handleSubmitForm = (event: React.FormEvent) => {
     event.preventDefault();
@@ -221,6 +287,11 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
       setError('Seleccioná tu nacionalidad.');
       return;
     }
+    if (!passengersValid) {
+      setPassengersTouched(true);
+      setError('Completá los datos de todos los pasajeros.');
+      return;
+    }
 
     setError(null);
     setStep('payment');
@@ -233,6 +304,18 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
 
     try {
       const baseUrl = getSiteUrl();
+      const passengerDetails = passengers.map((traveler) => {
+        const age = Math.max(0, Math.min(120, Number(traveler.age) || 0));
+        return {
+          firstName: traveler.firstName.trim(),
+          lastName: traveler.lastName.trim(),
+          age,
+          birthDate: traveler.birthDate.trim(),
+          phone: traveler.phone.trim(),
+          document: traveler.document.trim(),
+          travelerType: age < 18 ? 'minor' : 'adult',
+        };
+      });
       const response = await fetch('/api/mercadopago/preference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -242,6 +325,7 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
           date,
           people: travelerCount,
           ...(pax ? { peopleBreakdown: pax } : {}),
+          ...(passengerDetails.length ? { passengerDetails } : {}),
           customerEmail: form.customerEmail.trim(),
           customerName: `${form.customerFirstName.trim()} ${form.customerLastName.trim()}`.trim(),
           customerPhone: form.customerPhone.trim() || undefined,
@@ -327,6 +411,9 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
                     </CardHeader>
                     <CardContent>
                       <form onSubmit={handleSubmitForm} className="space-y-5" noValidate>
+                        <div className="text-sm font-extrabold uppercase tracking-[0.1em] text-[#0B2240]">
+                          Pasajero 1 <span className="font-semibold normal-case text-[#5A7898]">(Titular)</span>
+                        </div>
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-1.5">
                             <Label htmlFor="customerFirstName">Nombre *</Label>
@@ -433,6 +520,86 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
                           />
                         </div>
 
+                        {passengers.length > 0 ? (
+                          <div className="space-y-4 border-t border-[#E3EDF7] pt-4">
+                            {passengers.map((traveler, index) => {
+                              const errors = passengerErrors[index];
+                              const showErrors = passengersTouched;
+                              return (
+                                <div key={index} className="space-y-3 rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] p-4">
+                                  <div className="text-sm font-extrabold uppercase tracking-[0.1em] text-[#0B2240]">
+                                    Pasajero {index + 2}
+                                  </div>
+                                  <div className="grid gap-4 md:grid-cols-2">
+                                    <div className="space-y-1.5">
+                                      <Label htmlFor={`passenger-${index}-firstName`}>Nombre *</Label>
+                                      <Input
+                                        id={`passenger-${index}-firstName`}
+                                        value={traveler.firstName}
+                                        onChange={(event) => updatePassenger(index, { firstName: event.target.value })}
+                                        placeholder="Ej: Juan"
+                                      />
+                                      {showErrors && errors?.firstName ? <p className="text-xs font-semibold text-red-500">Minimo 2 caracteres.</p> : null}
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label htmlFor={`passenger-${index}-lastName`}>Apellido *</Label>
+                                      <Input
+                                        id={`passenger-${index}-lastName`}
+                                        value={traveler.lastName}
+                                        onChange={(event) => updatePassenger(index, { lastName: event.target.value })}
+                                        placeholder="Ej: Garcia"
+                                      />
+                                      {showErrors && errors?.lastName ? <p className="text-xs font-semibold text-red-500">Minimo 2 caracteres.</p> : null}
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label htmlFor={`passenger-${index}-age`}>Edad *</Label>
+                                      <Input
+                                        id={`passenger-${index}-age`}
+                                        type="number"
+                                        min={0}
+                                        max={120}
+                                        value={traveler.age}
+                                        onChange={(event) => updatePassenger(index, { age: event.target.value })}
+                                        placeholder="Ej: 30"
+                                      />
+                                      {showErrors && errors?.age ? <p className="text-xs font-semibold text-red-500">Ingresa una edad valida.</p> : null}
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label htmlFor={`passenger-${index}-birthDate`}>Fecha de nacimiento *</Label>
+                                      <ArgentineDateInput
+                                        id={`passenger-${index}-birthDate`}
+                                        value={traveler.birthDate}
+                                        onChange={(value) => updatePassenger(index, { birthDate: value })}
+                                      />
+                                      {showErrors && errors?.birthDate ? <p className="text-xs font-semibold text-red-500">Ingresa una fecha valida.</p> : null}
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label htmlFor={`passenger-${index}-phone`}>Telefono *</Label>
+                                      <Input
+                                        id={`passenger-${index}-phone`}
+                                        value={traveler.phone}
+                                        onChange={(event) => updatePassenger(index, { phone: event.target.value })}
+                                        placeholder="+54 11 ..."
+                                      />
+                                      {showErrors && errors?.phone ? <p className="text-xs font-semibold text-red-500">Ingresa un telefono valido.</p> : null}
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label htmlFor={`passenger-${index}-document`}>DNI / Pasaporte *</Label>
+                                      <Input
+                                        id={`passenger-${index}-document`}
+                                        value={traveler.document}
+                                        onChange={(event) => updatePassenger(index, { document: event.target.value })}
+                                        placeholder="Numero de documento"
+                                      />
+                                      {showErrors && errors?.document ? <p className="text-xs font-semibold text-red-500">Este dato es obligatorio.</p> : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+
                         <div className="space-y-1.5">
                           <Label htmlFor="customerComments">Comentarios</Label>
                           <Textarea
@@ -480,7 +647,7 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
                       >
                         <div className="flex items-center gap-4">
                           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E8F4FF]">
-                            {isLoading ? <Loader2 className="h-6 w-6 animate-spin text-[#009EE3]" /> : <img src="/images/mercado-pago-logo_white.png" alt="Mercado Pago" className="h-6" />}
+                            {isLoading ? <Loader2 className="h-6 w-6 animate-spin text-[#009EE3]" /> : <img src="/images/mercado-pago-logo.png" alt="Mercado Pago" className="h-6" />}
                           </div>
                           <div>
                             <div className="text-base font-bold text-[#0B2240]">Mercado Pago</div>
@@ -539,6 +706,19 @@ export default function CheckoutClient({ experience, date, people, pax, initialE
                 <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Personas</div>
                   <div className="mt-1 text-sm font-bold text-[#12325D]">{travelerCount}</div>
+                  {paxSummary.length > 0 ? (
+                    <div className="mt-1 text-xs text-[#5A7898]">
+                      {paxSummary.map((item) => `${item.value} ${item.label}`).join(' · ')}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 space-y-0.5 text-xs text-[#5A7898]">
+                    {Array.from({ length: travelerCount }).map((_, index) => (
+                      <div key={index}>
+                        Pasajero {index + 1}
+                        {index === 0 ? ' (Titular)' : ''}
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Reserva</div>

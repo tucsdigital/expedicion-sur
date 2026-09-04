@@ -54,13 +54,35 @@ const getSiteUrl = () => process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3
 function sameOrigin(request: Request): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return true;
-  const site = process.env.NEXT_PUBLIC_SITE_URL;
-  if (!site) return true;
+  let originValue: string;
   try {
-    return new URL(origin).origin === new URL(site).origin;
+    originValue = new URL(origin).origin;
   } catch {
     return false;
   }
+
+  const allowedOrigins = new Set<string>();
+  const site = process.env.NEXT_PUBLIC_SITE_URL;
+  if (site) {
+    try {
+      allowedOrigins.add(new URL(site).origin);
+    } catch {
+      // ignora NEXT_PUBLIC_SITE_URL mal configurada
+    }
+  }
+  try {
+    allowedOrigins.add(new URL(request.url).origin);
+  } catch {
+    // ignora request.url inválida
+  }
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
+  if (forwardedProto && forwardedHost) {
+    allowedOrigins.add(`${forwardedProto}://${forwardedHost}`);
+  }
+
+  if (allowedOrigins.size === 0) return true;
+  return allowedOrigins.has(originValue);
 }
 
 function getRequestBaseUrl(request: Request): string {

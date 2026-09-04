@@ -390,10 +390,10 @@ export function resolveDepartureConfig(paquete: Paquete, rawDate: string): Resol
   const unitAmount =
     typeof paquete.bookingConfig?.depositAmount === 'number' && paquete.bookingConfig.depositAmount > 0
       ? toAmountCents(paquete.bookingConfig.depositAmount)
-      : typeof paquete.precio === 'number' && paquete.precio > 0
+      : typeof salida?.precio === 'number' && salida.precio > 0
+        ? toAmountCents(salida.precio)
+        : typeof paquete.precio === 'number' && paquete.precio > 0
           ? toAmountCents(paquete.precio)
-        : typeof salida?.precio === 'number' && salida.precio > 0
-          ? toAmountCents(salida.precio)
           : 0;
   const maxPeople =
     typeof paquete.bookingConfig?.maxPeoplePerBooking === 'number' && paquete.bookingConfig.maxPeoplePerBooking > 0

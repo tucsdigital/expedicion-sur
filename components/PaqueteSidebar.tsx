@@ -374,8 +374,8 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                           <div key={`${year}-${month}`} className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
                             <div className="mb-3 text-sm font-extrabold capitalize text-black">{formatMonthLabel(year, month)}</div>
                             <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold uppercase text-slate-400">
-                              {WEEK_DAYS.map((day) => (
-                                <div key={`${year}-${month}-${day}`}>{day}</div>
+                              {WEEK_DAYS.map((day, dayIndex) => (
+                                <div key={`${year}-${month}-weekday-${dayIndex}`}>{day}</div>
                               ))}
                             </div>
                             <div className="mt-2 grid grid-cols-7 gap-1">

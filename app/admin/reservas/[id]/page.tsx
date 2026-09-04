@@ -852,6 +852,22 @@ export default function ReservaDetailPage() {
                   </p>
                 </div>
               ) : null}
+              <div className="rounded-2xl bg-gray-50/80 px-4 py-3 text-sm text-gray-700">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Pasajeros</p>
+                <div className="mt-1 space-y-0.5">
+                  <p className="text-sm font-medium text-gray-900">
+                    Pasajero 1: {reserva.customerName || 'Sin nombre'} <span className="text-xs text-gray-500">(Titular)</span>
+                  </p>
+                  {passengerDetails.map((traveler: any, index: number) => {
+                    const fullName = `${String(traveler?.firstName ?? '').trim()} ${String(traveler?.lastName ?? '').trim()}`.trim();
+                    return (
+                      <p key={index} className="text-sm font-medium text-gray-900">
+                        Pasajero {index + 2}: {fullName || 'Sin nombre'}
+                      </p>
+                    );
+                  })}
+                </div>
+              </div>
               {Array.isArray((reserva as any).selectedSeats) &&
               (reserva as any).selectedSeats.length > 0 &&
               reserva.date !== 'sin-fecha' ? (

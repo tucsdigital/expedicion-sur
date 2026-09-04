@@ -37,6 +37,15 @@ function parseArDateValue(value: string): string | null {
   return iso;
 }
 
+/** Inserta "/" automáticamente mientras se escriben los dígitos: 12051996 -> 12/05/1996 */
+function autoInsertSlashes(value: string): string {
+  const digits = String(value ?? "").replace(/\D/g, "").slice(0, 8);
+  const day = digits.slice(0, 2);
+  const month = digits.slice(2, 4);
+  const year = digits.slice(4, 8);
+  return [day, month, year].filter(Boolean).join("/");
+}
+
 type ArgentineDateInputProps = {
   value: string;
   onChange: (value: string) => void;
@@ -70,9 +79,11 @@ export function ArgentineDateInput({
         inputMode="numeric"
         autoComplete="bday"
         lang="es-AR"
+        maxLength={10}
         value={draft}
         onChange={(e) => {
-          const next = e.target.value;
+          const isDeleting = e.target.value.length < draft.length;
+          const next = isDeleting ? e.target.value : autoInsertSlashes(e.target.value);
           setDraft(next);
           const parsed = parseArDateValue(next);
           if (parsed !== null) {

@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ArgentineDateInput } from '@/components/ui/argentine-date-input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -535,10 +536,9 @@ export default function VendorNuevaReservaPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-1">
                         <Label>Fecha de nacimiento</Label>
-                        <Input
-                          type="date"
+                        <ArgentineDateInput
                           value={form.customerBirthDate}
-                          onChange={(e) => handleFormChange('customerBirthDate', e.target.value)}
+                          onChange={(value) => handleFormChange('customerBirthDate', value)}
                         />
                       </div>
                     </div>
@@ -592,14 +592,11 @@ export default function VendorNuevaReservaPage() {
                                     )
                                   }
                                 />
-                                <Input
-                                  type="date"
+                                <ArgentineDateInput
                                   value={traveler.birthDate}
-                                  onChange={(e) =>
+                                  onChange={(value) =>
                                     setPassengerDetails((prev) =>
-                                      prev.map((item, itemIndex) =>
-                                        itemIndex === index ? { ...item, birthDate: e.target.value } : item
-                                      )
+                                      prev.map((item, itemIndex) => (itemIndex === index ? { ...item, birthDate: value } : item))
                                     )
                                   }
                                 />

@@ -8,7 +8,7 @@ import Link from 'next/link';
 import RichTextEditor from '@/components/admin/RichTextEditor';
 import ItineraryStepsEditor from '@/components/admin/ItineraryStepsEditor';
 import ImageUploader from '@/components/admin/ImageUploader';
-import AddonsManager from '@/components/admin/AddonsManager';
+// import AddonsManager from '@/components/admin/AddonsManager'; // TEMPORAL: modulo Adicionales desactivado
 import EditableList from '@/components/admin/EditableList';
 import DragDropOrderManager from '@/components/admin/DragDropOrderManager';
 import SalidasManager from '@/components/admin/SalidasManager';
@@ -719,6 +719,7 @@ export default function PackageForm(props: Props) {
           </CardContent>
         </Card>
 
+        {/* TEMPORAL: modulo "Adicionales" desactivado. Descomentar (y el import de AddonsManager) para volver a usarlo.
         <Card id="adicionales-section">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2">
@@ -733,6 +734,7 @@ export default function PackageForm(props: Props) {
             <AddonsManager items={addons} onItemsChange={onAddonsChange} disabled={isBusy} />
           </CardContent>
         </Card>
+        */}
 
         <Card>
           <CardHeader className="pb-4">
@@ -768,6 +770,7 @@ export default function PackageForm(props: Props) {
               />
             </div>
 
+            {/* TEMPORAL: "Anticipacion minima de reserva" desactivada (se mantiene el valor guardado o 48 hs). Descomentar para volver a usarla.
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
               <div className="flex items-center gap-2">
                 <Label htmlFor="minLeadHours">Anticipación mínima de reserva (horas)</Label>
@@ -793,6 +796,7 @@ export default function PackageForm(props: Props) {
               </p>
               {errors.minLeadHours && <p className="text-base text-red-500 mt-1">{errors.minLeadHours.message}</p>}
             </div>
+            */}
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">

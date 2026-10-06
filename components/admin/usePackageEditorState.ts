@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import type { Paquete, Salida } from '@/types';
 import type { CondicionItem } from '@/lib/packages/admin-form';
+import { normalizePackageAddons, type AddonFormItem } from '@/lib/packages/package-addons';
 
 export type ImageAsset = {
   url: string;
@@ -34,6 +35,7 @@ export function usePackageEditorState({ defaultCondiciones }: Options) {
   const [tagItems, setTagItems] = useState<string[]>([]);
   const [noIncludeItems, setNoIncludeItems] = useState<string[]>([]);
   const [condicionesItems, setCondicionesItems] = useState<CondicionItem[]>(defaultCondiciones.map((item) => ({ ...item })));
+  const [addons, setAddons] = useState<AddonFormItem[]>([]);
   const [salidas, setSalidas] = useState<Salida[]>([]);
   const [fechaVencimiento, setFechaVencimiento] = useState('');
 
@@ -141,6 +143,7 @@ export function usePackageEditorState({ defaultCondiciones }: Options) {
           : defaultCondiciones.map((item) => ({ ...item }))
       );
       setSalidas(data.salidas || []);
+      setAddons(normalizePackageAddons((data as any).addons));
       setFechaVencimiento(String((data as any).fechaVencimiento ?? ''));
     },
     [defaultCondiciones]
@@ -180,6 +183,8 @@ export function usePackageEditorState({ defaultCondiciones }: Options) {
     setNoIncludeItems,
     condicionesItems,
     setCondicionesItems,
+    addons,
+    setAddons,
     salidas,
     setSalidas,
     fechaVencimiento,

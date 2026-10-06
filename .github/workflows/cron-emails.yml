@@ -1,0 +1,19 @@
+name: Cron - Emails
+
+on:
+  schedule:
+    # GitHub Actions permite una frecuencia mínima práctica de 5 minutos.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  send-emails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar endpoint de emails pendientes
+        run: |
+          test -n "${{ secrets.APP_URL }}" || (echo "Falta APP_URL" && exit 1)
+          test -n "${{ secrets.CRON_SECRET }}" || (echo "Falta CRON_SECRET" && exit 1)
+          curl --fail-with-body --silent --show-error --retry 2 -X GET "${{ secrets.APP_URL }}/api/cron/email" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json"

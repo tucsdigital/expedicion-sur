@@ -98,6 +98,15 @@ async function fetchPendingJobs(batchSize: number): Promise<{ id: string; data: 
 }
 
 export async function POST(request: Request) {
+  return processEmailQueue(request);
+}
+
+export async function GET(request: Request) {
+  // GET para Vercel Cron (solo permite GET por defecto en Hobby).
+  return processEmailQueue(request);
+}
+
+async function processEmailQueue(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }

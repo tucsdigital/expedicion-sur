@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getPayment, searchPayments, mapPaymentStatusToReservationStatus, isPaymentApproved, isPaymentRejected } from '@/lib/mercadopago';
-import { getFromEmail } from '@/lib/resend';
+import { getPayment, isPaymentApproved, isPaymentRejected, mapPaymentStatusToReservationStatus } from '@/lib/mercadopago';
+import { getFromEmail, isResendConfigured, resend } from '@/lib/resend';
 import { getPaqueteById } from '@/lib/paquetes';
 import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
 import {
@@ -16,11 +16,9 @@ import { resolveReferralFromCode, computeCommission, nextPayoutStatusForReservat
 import { getSeatDepartureId, seatIdsFromLabels } from '@/lib/seats/server';
 import type { SeatLayoutTemplate } from '@/types';
 import {
-  generateReservationCode,
   normalizeDigits,
   normalizeEmail,
-  prepareNextReservationCodeInTransaction,
-  reserveNextReservationCodeInTransaction,
+  reserveNextReservationCode,
 } from '@/lib/reservas/code';
 import { buildDefaultEmailDelivery, buildQueuedEmailDelivery } from '@/lib/sales/status';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
@@ -118,6 +116,50 @@ function formatAmount(amountTotal: number, currency: string): string {
   return `$ ${value.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`;
 }
 
+/**
+ * Desglose de precios para emails y snapshots: subtotal base + cada extra
+ * (adicionales, gastos administrativos) con su monto efectivo según scope.
+ */
+function buildPriceBreakdown(input: {
+  rawExtras: any;
+  baseSubtotalAmount: unknown;
+  people: number;
+  currency: string;
+  peopleLabel: string;
+}): {
+  baseSubtotalLabel?: string;
+  extrasItems?: Array<{ label: string; amountFormatted: string }>;
+  selectedExtras: any[] | null;
+  extrasTotalAmount?: number | null;
+} {
+  const rawExtras = Array.isArray(input.rawExtras) ? input.rawExtras : [];
+  const people = Math.max(1, Math.floor(input.people) || 1);
+  let extrasCents = 0;
+  const extrasItems: Array<{ label: string; amountFormatted: string }> = [];
+  for (const extra of rawExtras) {
+    const label = String(extra?.label ?? '').trim();
+    const amount = Math.max(0, Number(extra?.amount ?? 0) || 0);
+    const scope = String(extra?.scope ?? 'per_person');
+    if (!label || amount <= 0) continue;
+    const effective = scope === 'per_booking' ? amount : amount * people;
+    extrasCents += effective;
+    extrasItems.push({ label, amountFormatted: formatAmount(effective, input.currency) });
+  }
+
+  const baseSubtotalAmount =
+    typeof input.baseSubtotalAmount === 'number' && input.baseSubtotalAmount > 0 ? Number(input.baseSubtotalAmount) : null;
+  const hasBreakdown = Boolean(baseSubtotalAmount) || extrasItems.length > 0;
+
+  return {
+    ...(baseSubtotalAmount
+      ? { baseSubtotalLabel: `${formatAmount(baseSubtotalAmount, input.currency)} (${input.peopleLabel || `${people} pasajeros`})` }
+      : {}),
+    ...(extrasItems.length > 0 ? { extrasItems } : {}),
+    selectedExtras: rawExtras.length > 0 ? rawExtras : null,
+    ...(hasBreakdown ? { extrasTotalAmount: extrasCents } : {}),
+  };
+}
+
 function formatDate(date: string): string {
   if (!date || date === 'sin-fecha') return 'A coordinar';
   try {
@@ -134,13 +176,11 @@ function formatDate(date: string): string {
 
 function computeVoucherNextAttemptAt(params: {
   date: string;
-  pickupPointTime?: string | null;
   now: Timestamp;
 }): Timestamp {
   const date = String(params.date ?? '').trim();
-  const time = String(params.pickupPointTime ?? '').trim();
   if (!date || date === 'sin-fecha') return params.now;
-  const hhmm = /^\d{2}:\d{2}$/.test(time) ? time : '09:00';
+  const hhmm = '09:00';
   const ts = new Date(`${date}T${hhmm}:00-03:00`).getTime();
   if (!Number.isFinite(ts) || ts <= 0) return params.now;
   const dueMs = ts - 48 * 60 * 60 * 1000;
@@ -155,6 +195,40 @@ function getBaseCapacityForDate(
 ): number {
   if (!paquete) return 0;
   return resolveDepartureConfig(paquete, date).baseCapacity;
+}
+
+/**
+ * Envía un email con Resend si está configurado. Devuelve el id del proveedor
+ * o null cuando no se pudo enviar (para que el job quede pendiente y el cron
+ * lo reintente). Nunca lanza: fallar el envío no debe romper el webhook.
+ */
+async function trySendEmailNow(input: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string | null;
+  replyTo?: string | null;
+  from: string;
+}): Promise<string | null> {
+  if (!isResendConfigured() || !resend) return null;
+  try {
+    const { data, error } = await resend.emails.send({
+      from: input.from,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text ?? undefined,
+      replyTo: input.replyTo ?? undefined,
+    });
+    if (error) {
+      console.error('[mercadopago-webhook] Resend rechazó el email:', error);
+      return null;
+    }
+    return data?.id ?? 'sent';
+  } catch (error) {
+    console.error('[mercadopago-webhook] No se pudo enviar el email ahora:', error);
+    return null;
+  }
 }
 
 async function recordMPNotification(params: {
@@ -187,10 +261,6 @@ export async function POST(request: Request) {
     const url = new URL(request.url);
     const body = await request.json().catch(() => null);
     const notification = buildNotificationFromRequest({ body, searchParams: url.searchParams });
-
-    // #region debug-point B:webhook-entry
-    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'mp-webhook-order', runId: 'pre-fix', hypothesisId: 'B', location: 'app/api/mercadopago/webhook/route.ts:POST:entry', msg: '[DEBUG] webhook received', data: { type: notification?.type ?? null, action: notification?.action ?? null, paymentId: notification?.data?.id ?? null, queryType: url.searchParams.get('type') ?? url.searchParams.get('topic') ?? null, queryPaymentId: url.searchParams.get('data.id') ?? url.searchParams.get('id') ?? null }, ts: Date.now() }) }).catch(() => {});
-    // #endregion
 
     // Validar que sea una notificación válida
     if (!notification || !notification.type || !notification.data?.id) {
@@ -247,10 +317,6 @@ export async function POST(request: Request) {
     const paymentStatus = paymentInfo.status;
     const isApproved = isPaymentApproved(paymentStatus);
 
-    // #region debug-point B:webhook-payment
-    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'mp-webhook-order', runId: 'pre-fix', hypothesisId: 'B', location: 'app/api/mercadopago/webhook/route.ts:POST:paymentInfo', msg: '[DEBUG] webhook payment fetched', data: { paymentId: String(paymentId), externalReference: String(externalReference || ''), paymentStatus: String(paymentStatus || ''), isApproved }, ts: Date.now() }) }).catch(() => {});
-    // #endregion
-
     let orderIdFromRef = '';
     const externalRefStr = String(externalReference || '');
     if (externalRefStr.startsWith('order-')) {
@@ -291,9 +357,6 @@ export async function POST(request: Request) {
     }
 
     if (!intentData) {
-      // #region debug-point C:intent-not-found
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'mp-webhook-order', runId: 'pre-fix', hypothesisId: 'C', location: 'app/api/mercadopago/webhook/route.ts:POST:intentMissing', msg: '[DEBUG] webhook intent not found', data: { paymentId: String(paymentId), externalReference, orderIdFromRef, orderFound: Boolean(orderData) }, ts: Date.now() }) }).catch(() => {});
-      // #endregion
       await recordMPNotification({
         notificationId,
         type: notification.type,
@@ -310,9 +373,6 @@ export async function POST(request: Request) {
     const cartItems = Array.isArray(orderData?.items) ? orderData.items : (Array.isArray(intentData.items) ? intentData.items : null);
     const orderId = orderData?.id ? String(orderData.id) : '';
     if (cartId && cartItems && cartItems.length) {
-      // #region debug-point D:webhook-transaction-start
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'mp-webhook-order', runId: 'pre-fix', hypothesisId: 'D', location: 'app/api/mercadopago/webhook/route.ts:POST:transactionStart', msg: '[DEBUG] webhook transaction starting', data: { paymentId: String(paymentId), orderId, cartId: String(cartId), itemCount: cartItems.length, orderStatus: String(orderData?.status ?? ''), orderPaymentStatus: String(orderData?.payment?.status ?? '') }, ts: Date.now() }) }).catch(() => {});
-      // #endregion
       const reservationStatus = mapPaymentStatusToReservationStatus(paymentStatus);
       const isPixPending = paymentStatus === 'pending' || paymentStatus === 'in_process';
       const isRejected = isPaymentRejected(paymentStatus);
@@ -328,12 +388,16 @@ export async function POST(request: Request) {
         (orderData?.customer?.birthDate ? String(orderData.customer.birthDate) : '') ||
         (intentData.customerBirthDate ? String(intentData.customerBirthDate) : '') ||
         null;
+      const customerAge = typeof intentData.customerAge === 'number' ? intentData.customerAge : null;
+      const customerHotel = intentData.customerHotel ? String(intentData.customerHotel) : null;
+      const customerCountry =
+        (orderData?.customer?.country ? String(orderData.customer.country) : '') ||
+        (intentData.customerCountry ? String(intentData.customerCountry) : '') ||
+        null;
       const passengerDetails = Array.isArray(orderData?.passengerDetails)
         ? orderData.passengerDetails
         : (Array.isArray(intentData.passengerDetails) ? intentData.passengerDetails : null);
       const intentComments = intentData.customerComments || null;
-      const intentNationality = intentData.customerNationality || null;
-      const intentDietaryRestrictions = intentData.customerDietaryRestrictions || null;
 
       const from = getFromEmail(true);
       const replyTo = process.env.SUPPORT_EMAIL || getFromEmail(false);
@@ -349,6 +413,102 @@ export async function POST(request: Request) {
         pkgs.set(pid, await getPaqueteById(pid));
       }
 
+      // Reservar códigos secuenciales ANTES de la transacción: un código
+      // único por cada item del carrito que aún no tenga reserva. Así la tx
+      // solo lee primero y escribe después (Firestore lo exige) y ningún item
+      // del mismo pago comparte código.
+      let reservedCodes: string[] = [];
+      if (isApproved) {
+        try {
+          for (let i = 0; i < cartItems.length; i += 1) {
+            reservedCodes.push(await reserveNextReservationCode());
+          }
+        } catch (error) {
+          console.error('[mercadopago-webhook] No se pudieron reservar códigos:', error);
+          return NextResponse.json({ error: 'No se pudo generar el código de reserva' }, { status: 500 });
+        }
+      }
+
+      // Guard: evitar enviar emails duplicados si el pago ya fue procesado
+      // (Mercado Pago puede reenviar la misma notificación por timeout).
+      if (cartId) {
+        const cartDupSnap = await getDoc(cartRef);
+        if (cartDupSnap.exists()) {
+          const cartProcessed = Array.isArray(cartDupSnap.data()?.processedPaymentIds)
+            ? cartDupSnap.data().processedPaymentIds.map(String)
+            : [];
+          if (cartProcessed.includes(String(paymentId))) {
+            await recordMPNotification({
+              notificationId,
+              type: notification.type,
+              action: notification.action,
+              paymentId: String(paymentId),
+              externalReference,
+              status: 'ignored',
+              reason: 'payment_already_processed',
+              reservationId: orderId || null,
+            });
+            return NextResponse.json({ received: true });
+          }
+        }
+      }
+
+      // Envío inmediato de emails (no depende del cron): se preparan los
+      // cuerpos por item usando su propio código y se envían con Resend.
+      // Si el envío funciona, el job se guarda como "sent"; si no, queda
+      // "pending" para que el cron lo reintente.
+      const sendResults: { confirm: Record<string, string>; voucher: Record<string, string>; admin: Record<string, string> } = {
+        confirm: {},
+        voucher: {},
+        admin: {},
+      };
+      if (isApproved) {
+        for (let idx = 0; idx < cartItems.length; idx += 1) {
+          const it = cartItems[idx] as any;
+          const reservationId = orderId
+            ? `ord_${orderId}_${String(it.cartItemId || it.id || `idx_${idx}`)}`
+            : `mp_${paymentId}_${String(it.cartItemId || it.id || `idx_${idx}`)}`;
+          const code = reservedCodes[idx] ?? '';
+          const pkg = pkgs.get(String(it.packageId || '')) ?? null;
+          const finalTitle = String(it.packageTitle || it.experienceTitle || '') || pkg?.titulo || SITE_NAME;
+          const itemDate = String(it.date || 'sin-fecha');
+          const itemPeople = Number(it.people ?? 0) || 0;
+          const itemCurrency = String(it.currency || intentData.currency || 'ars');
+          const itemAmount = Number(it.subtotalAmount ?? it.amountTotal ?? 0) || 0;
+          const itemPeopleLabel = itemPeople === 1 ? '1 persona' : `${itemPeople} personas`;
+          const breakdown = buildPriceBreakdown({
+            rawExtras: (it as any).selectedExtras ?? intentData.selectedExtras,
+            baseSubtotalAmount: (it as any).baseSubtotalAmount ?? intentData.baseSubtotalAmount,
+            people: itemPeople,
+            currency: itemCurrency,
+            peopleLabel: itemPeopleLabel,
+          });
+          const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '');
+          const itemLookupUrl = siteUrl && code ? `${siteUrl}/consultar-reserva?code=${encodeURIComponent(code)}` : undefined;
+          const itemEmailData = {
+            customerName,
+            experienceTitle: finalTitle,
+            dateFormatted: formatDate(itemDate),
+            peopleLabel: itemPeopleLabel,
+            seatsLabel: Array.isArray((it as any).selectedSeats) && (it as any).selectedSeats.length
+              ? (it as any).selectedSeats.map((s: any) => String(s)).join(', ')
+              : undefined,
+            amountFormatted: formatAmount(itemAmount || 0, itemCurrency),
+            ...breakdown,
+            reservationCode: code,
+            lookupUrl: itemLookupUrl,
+            sessionId: reservationId,
+            customerEmail,
+            customerPhone: customerPhone || undefined,
+            customerCountry: customerCountry || undefined,
+            customerComments: intentComments || undefined,
+          };
+          // Los jobs se crean dentro de la transacción y los procesa el cron.
+          // No enviar desde antes de la transacción: webhook duplicado + flujo
+          // de retorno pueden ejecutarse en paralelo y mandar dos emails.
+        }
+      }
+
       try {
         await runTransaction(db, async (tx) => {
           const pendingWrites: Array<() => void> = [];
@@ -357,9 +517,6 @@ export async function POST(request: Request) {
           };
           const queueSet = (ref: any, data: any, options?: any) => {
             pendingWrites.push(() => (options ? tx.set(ref, data, options) : tx.set(ref, data)));
-          };
-          const queueWrite = (write: () => void) => {
-            pendingWrites.push(write);
           };
           const flushWrites = () => {
             for (const write of pendingWrites) write();
@@ -583,7 +740,6 @@ export async function POST(request: Request) {
             const holdId = it.holdId ? String(it.holdId) : null;
             const cartItemId = String(it.cartItemId || it.id || `idx_${idx}`);
             const referralCode = String(it.referralCode || intentData.referral?.code || '');
-            const pickupPointTime = (it as any).pickupPointTime ? String((it as any).pickupPointTime).trim() : null;
 
             if (!packageId || !people || people < 1) continue;
 
@@ -594,6 +750,13 @@ export async function POST(request: Request) {
             const peopleLabel = people === 1 ? '1 persona' : `${people} personas`;
             const amountFormatted = formatAmount(amountTotalItem || (paymentInfo.transaction_amount ? Math.round(paymentInfo.transaction_amount * 100) : 0), currency);
             const dateFormatted = formatDate(date);
+            const itemPriceBreakdown = buildPriceBreakdown({
+              rawExtras: (it as any).selectedExtras ?? intentData.selectedExtras,
+              baseSubtotalAmount: (it as any).baseSubtotalAmount ?? intentData.baseSubtotalAmount,
+              people,
+              currency,
+              peopleLabel,
+            });
 
             const reservationId = orderId ? `ord_${orderId}_${cartItemId}` : `mp_${paymentId}_${cartItemId}`;
             const reservaRef = doc(db, 'reservas', reservationId);
@@ -619,7 +782,9 @@ export async function POST(request: Request) {
             const paymentSnap = await tx.get(paymentRef);
 
             if (!reservaSnap.exists()) {
-              const reservationCodeAllocation = await prepareNextReservationCodeInTransaction(tx);
+              // El código se asigna fuera de esta transacción (cada
+              // carrito con N items necesita N códigos; reservarlos uno por
+              // uno dentro de la tx rompe la regla reads-antes-de-writes).
               let referredBy: any = undefined;
               if (referralCode) {
                 const resolved = await resolveReferralFromCode(referralCode);
@@ -653,8 +818,7 @@ export async function POST(request: Request) {
                 }
               }
 
-              const reservationCode = reservationCodeAllocation.reservationCode;
-              queueWrite(reservationCodeAllocation.commit);
+              const reservationCode = reservedCodes[idx] ?? `TMP-${reservationId.slice(-8).toUpperCase()}`;
               const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '');
               const lookupUrl = siteUrl
                 ? `${siteUrl}/consultar-reserva?code=${encodeURIComponent(reservationCode)}`
@@ -669,17 +833,14 @@ export async function POST(request: Request) {
                   ? (it as any).selectedSeats.map((s: any) => String(s)).join(', ')
                   : undefined,
                 amountFormatted,
+                ...itemPriceBreakdown,
                 reservationCode,
                 lookupUrl,
                 sessionId: reservationId,
                 customerEmail: customerEmail || '',
                 customerPhone: customerPhone || undefined,
-                customerCountry: undefined,
-                customerNationality: intentNationality || undefined,
-                customerDietaryRestrictions: intentDietaryRestrictions || undefined,
+                customerCountry: customerCountry || undefined,
                 customerComments: intentComments || undefined,
-                pickupPoint: (it as any).pickupPoint ? String((it as any).pickupPoint) : null,
-                pickupPointTime,
               };
               const htmlConfirm = buildClienteCompraConfirmadaHtml(emailData);
               const textConfirm = buildClienteCompraConfirmadaText(emailData);
@@ -687,7 +848,7 @@ export async function POST(request: Request) {
               const textVoucher = buildClienteVoucher48hsText(emailData);
               const htmlAdmin = buildAdminNuevaReservaHtml(emailData);
               const textAdmin = buildAdminNuevaReservaText(emailData);
-              const nextAttemptAtVoucher = computeVoucherNextAttemptAt({ date, pickupPointTime, now });
+              const nextAttemptAtVoucher = computeVoucherNextAttemptAt({ date, now });
               const shouldQueueVoucher = Boolean(date && date !== 'sin-fecha');
 
               queueSet(reservaRef, {
@@ -704,9 +865,6 @@ export async function POST(request: Request) {
                 people,
                 peopleAdults: typeof (it as any).peopleAdults === 'number' ? Number((it as any).peopleAdults) : null,
                 peopleMinors: typeof (it as any).peopleMinors === 'number' ? Number((it as any).peopleMinors) : null,
-                pickupPoint: (it as any).pickupPoint ? String((it as any).pickupPoint) : null,
-                pickupPointTime,
-                roomType: (it as any).roomType ? String((it as any).roomType) : null,
                 seatLayoutId:
                   (typeof (it as any).seatLayoutId === 'string' ? String((it as any).seatLayoutId).trim() : '') ||
                   (pkg ? resolveDepartureConfig(pkg, date).seatLayoutId : null),
@@ -717,6 +875,14 @@ export async function POST(request: Request) {
                 unitAmountMinors: unitAmountMinors !== null ? unitAmountMinors : null,
                 depositPercentAdults: depositPercentAdults !== null ? depositPercentAdults : null,
                 depositPercentMinors: depositPercentMinors !== null ? depositPercentMinors : null,
+                selectedExtras: itemPriceBreakdown.selectedExtras,
+                baseSubtotalAmount:
+                  typeof (it as any).baseSubtotalAmount === 'number'
+                    ? Number((it as any).baseSubtotalAmount)
+                    : typeof intentData.baseSubtotalAmount === 'number'
+                      ? Number(intentData.baseSubtotalAmount)
+                      : null,
+                extrasTotalAmount: itemPriceBreakdown.extrasTotalAmount ?? null,
                 amountTotal: amountTotalItem || Math.round(paymentInfo.transaction_amount * 100),
                 currency: currency || paymentInfo.currency_id || 'ars',
                 paymentMethod: 'mercadopago',
@@ -732,13 +898,13 @@ export async function POST(request: Request) {
                 customerNameLower: (customerName || '').trim().toLowerCase() || null,
                 customerPhone: customerPhone || null,
                 customerPhoneNormalized: normalizeDigits(customerPhone),
-                customerCountry: payer?.address?.country || null,
+                customerCountry: customerCountry || payer?.address?.country || null,
                 customerDocument: customerDocument || null,
                 customerDocumentNormalized: normalizeDigits(customerDocument),
                 customerBirthDate,
+                customerAge,
+                customerHotel,
                 customerComments: intentComments || null,
-                customerNationality: intentNationality || null,
-                customerDietaryRestrictions: intentDietaryRestrictions || null,
                 passengerDetails,
                 reservationCode,
                 status: isPixPending ? 'pending' : reservationStatus,
@@ -753,6 +919,13 @@ export async function POST(request: Request) {
                         : null,
                   people,
                   amountTotal: amountTotalItem || (paymentInfo.transaction_amount ? Math.round(paymentInfo.transaction_amount * 100) : 0),
+                  baseSubtotalAmount:
+                    typeof (it as any).baseSubtotalAmount === 'number'
+                      ? Number((it as any).baseSubtotalAmount)
+                      : typeof intentData.baseSubtotalAmount === 'number'
+                        ? Number(intentData.baseSubtotalAmount)
+                        : null,
+                  extrasTotalAmount: itemPriceBreakdown.extrasTotalAmount ?? null,
                   currency: currency || paymentInfo.currency_id || 'ars',
                   paymentMethod: 'mercadopago',
                 }),
@@ -797,17 +970,23 @@ export async function POST(request: Request) {
               }
 
               if (!emailClienteConfirmSnap.exists() && customerEmail && isApproved) {
+                const subjectConfirm = `Compra confirmada: ${finalPackageTitle || SITE_NAME}`;
+                // Jobs "sent" cuando el envío inmediato funcionó: el cliente
+                // recibe el email aunque el cron no esté configurado.
+                const confirmSendId = sendResults.confirm[reservationId] ?? null;
                 queueSet(emailClienteConfirmRef, {
                   type: 'cliente_confirmacion_compra',
-                  status: 'pending',
+                  status: confirmSendId ? 'sent' : 'pending',
                   to: customerEmail,
                   from,
                   replyTo,
-                  subject: `Compra confirmada: ${finalPackageTitle || SITE_NAME}`,
+                  subject: subjectConfirm,
                   html: htmlConfirm,
                   text: textConfirm,
-                  attempts: 0,
+                  attempts: confirmSendId ? 1 : 0,
                   lastError: null,
+                  providerMessageId: confirmSendId,
+                  sentAt: confirmSendId ? now : null,
                   mercadoPagoPaymentId: String(paymentId),
                   reservationId,
                   nextAttemptAt: now,
@@ -817,17 +996,20 @@ export async function POST(request: Request) {
               }
 
               if (!emailClienteVoucherSnap.exists() && customerEmail && isApproved && shouldQueueVoucher) {
+                const voucherSendId = sendResults.voucher[reservationId] ?? null;
                 queueSet(emailClienteVoucherRef, {
                   type: 'cliente_voucher_48hs',
-                  status: 'pending',
+                  status: voucherSendId ? 'sent' : 'pending',
                   to: customerEmail,
                   from,
                   replyTo,
                   subject: `Recordatorio de salida (48 hs): ${finalPackageTitle || SITE_NAME}`,
                   html: htmlVoucher,
                   text: textVoucher,
-                  attempts: 0,
+                  attempts: voucherSendId ? 1 : 0,
                   lastError: null,
+                  providerMessageId: voucherSendId,
+                  sentAt: voucherSendId ? now : null,
                   mercadoPagoPaymentId: String(paymentId),
                   reservationId,
                   nextAttemptAt: nextAttemptAtVoucher,
@@ -837,17 +1019,20 @@ export async function POST(request: Request) {
               }
 
               if (!emailAdminSnap.exists() && CONTACT_INFO.email && isApproved) {
+                const adminSendId = sendResults.admin[reservationId] ?? null;
                 queueSet(emailAdminRef, {
                   type: 'admin_aviso',
-                  status: 'pending',
+                  status: adminSendId ? 'sent' : 'pending',
                   to: CONTACT_INFO.email,
                   from,
                   replyTo,
                   subject: `Nueva reserva: ${finalPackageTitle || 'Paquete'} — ${customerName || customerEmail}`,
                   html: htmlAdmin,
                   text: textAdmin,
-                  attempts: 0,
+                  attempts: adminSendId ? 1 : 0,
                   lastError: null,
+                  providerMessageId: adminSendId,
+                  sentAt: adminSendId ? now : null,
                   mercadoPagoPaymentId: String(paymentId),
                   reservationId,
                   nextAttemptAt: now,
@@ -1136,16 +1321,9 @@ export async function POST(request: Request) {
           status: 'processed',
         });
 
-        // #region debug-point D:webhook-processed
-        fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'mp-webhook-order', runId: 'pre-fix', hypothesisId: 'D', location: 'app/api/mercadopago/webhook/route.ts:POST:processed', msg: '[DEBUG] webhook processed successfully', data: { paymentId: String(paymentId), externalReference, orderId, isApproved, paymentStatus: String(paymentStatus || '') }, ts: Date.now() }) }).catch(() => {});
-        // #endregion
-
         return NextResponse.json({ received: true, processed: true });
       } catch (error) {
         const errorDetail = error instanceof Error ? error.message : String(error);
-        // #region debug-point B:webhook-error
-        fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'mp-webhook-order', runId: 'pre-fix', hypothesisId: 'B', location: 'app/api/mercadopago/webhook/route.ts:POST:catch', msg: '[DEBUG] webhook processing failed', data: { paymentId: String(paymentId), externalReference, error: errorDetail }, ts: Date.now() }) }).catch(() => {});
-        // #endregion
         console.error('[mercadopago-webhook] Error procesando carrito:', error);
         await recordMPNotification({
           notificationId,
@@ -1173,14 +1351,13 @@ export async function POST(request: Request) {
       customerEmail: intentEmail,
       customerName: intentName,
       customerPhone: intentPhone,
+      customerCountry: intentCountry,
       customerDocument: intentDocument,
-       customerBirthDate: intentBirthDate,
-       customerComments: intentComments,
-       customerNationality: intentNationality,
-       customerDietaryRestrictions: intentDietaryRestrictions,
-       passengerDetails: intentPassengerDetails,
-       referral,
-     } = intentData;
+      customerBirthDate: intentBirthDate,
+      customerComments: intentComments,
+      passengerDetails: intentPassengerDetails,
+      referral,
+    } = intentData;
 
     // Obtener datos actualizados del paquete
     const pkg = packageId ? await getPaqueteById(packageId) : null;
@@ -1200,18 +1377,34 @@ export async function POST(request: Request) {
       : intentName || '';
     const customerPhone = payer?.phone?.number || intentPhone || '';
     const customerDocument = payer?.identification?.number || intentDocument || '';
-     const customerBirthDate = intentBirthDate ? String(intentBirthDate) : null;
-     const customerNationality = intentNationality ? String(intentNationality) : null;
-     const customerDietaryRestrictions = intentDietaryRestrictions ? String(intentDietaryRestrictions) : null;
-     const passengerDetails = Array.isArray(intentPassengerDetails) ? intentPassengerDetails : null;
+    const customerBirthDate = intentBirthDate ? String(intentBirthDate) : null;
+    const customerAge = typeof intentData.customerAge === 'number' ? intentData.customerAge : null;
+    const customerHotel = intentData.customerHotel ? String(intentData.customerHotel) : null;
+    const customerCountry = (intentCountry ? String(intentCountry) : '') || payer?.address?.country || null;
+    const passengerDetails = Array.isArray(intentPassengerDetails) ? intentPassengerDetails : null;
 
     // Preparar datos para emails
     const amountFormatted = formatAmount(amountTotal || paymentInfo.transaction_amount * 100, currency || 'ars');
     const dateFormatted = formatDate(date);
     const peopleLabel = people === 1 ? '1 persona' : `${people} personas`;
+    const priceBreakdown = buildPriceBreakdown({
+      rawExtras: (intentData as any).selectedExtras,
+      baseSubtotalAmount: (intentData as any).baseSubtotalAmount,
+      people,
+      currency: currency || 'ars',
+      peopleLabel,
+    });
 
     const reservationId = `mp_${paymentId}`;
-    const reservationCode = generateReservationCode(reservationId, Date.now());
+    // Código secuencial reservado en su propia transacción (igual que el
+    // resto de los flujos), en lugar del derivado del paymentId.
+    let reservationCode: string;
+    try {
+      reservationCode = await reserveNextReservationCode();
+    } catch (error) {
+      console.error('[mercadopago-webhook] No se pudo generar el código:', error);
+      return NextResponse.json({ error: 'No se pudo generar el código de reserva' }, { status: 500 });
+    }
     const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '');
     const lookupUrl = siteUrl
       ? `${siteUrl}/consultar-reserva?code=${encodeURIComponent(reservationCode)}`
@@ -1223,17 +1416,14 @@ export async function POST(request: Request) {
       dateFormatted,
       peopleLabel,
       amountFormatted,
+      ...priceBreakdown,
       reservationCode,
       lookupUrl,
       sessionId: String(paymentId),
       customerEmail: customerEmail || '',
       customerPhone: customerPhone || undefined,
-      customerCountry: undefined,
-      customerNationality: intentNationality || undefined,
-      customerDietaryRestrictions: intentDietaryRestrictions || undefined,
+      customerCountry: customerCountry || undefined,
       customerComments: intentComments || undefined,
-      pickupPoint: null,
-      pickupPointTime: null,
     };
 
     const htmlConfirm = buildClienteCompraConfirmadaHtml(emailData);
@@ -1244,6 +1434,9 @@ export async function POST(request: Request) {
     const textAdmin = buildAdminNuevaReservaText(emailData);
     const from = getFromEmail(true);
     const replyTo = process.env.SUPPORT_EMAIL || getFromEmail(false);
+    const nextAttemptAtVoucherDirect = computeVoucherNextAttemptAt({ date, now: Timestamp.now() });
+    const shouldQueueVoucherDirect = Boolean(date && date !== 'sin-fecha');
+    const directSend: { confirm?: string; voucher?: string; admin?: string } = {};
 
     // Crear o actualizar reserva en Firestore
     try {
@@ -1255,13 +1448,42 @@ export async function POST(request: Request) {
       const emailAdminRef = doc(db, 'emailJobs', `mp_${reservationId}_admin`);
 
       const txResult = await runTransaction(db, async (tx) => {
+        // ============================================
+        // FASE 1: TODAS LAS LECTURAS
+        // ============================================
         const reservaSnap = await tx.get(reservaRef);
         const stockSnap = await tx.get(stockRef);
         const emailClienteConfirmSnap = await tx.get(emailClienteConfirmRef);
         const emailClienteVoucherSnap = await tx.get(emailClienteVoucherRef);
         const emailAdminSnap = await tx.get(emailAdminRef);
-        const nextAttemptAtVoucher = computeVoucherNextAttemptAt({ date, pickupPointTime: null, now });
+
+        // Lectura de hold y lock (debe ser antes de todas las escrituras)
+        let holdSnap: any = null;
+        let lockSnap: any = null;
+        let lockRef: any = null;
+        let holdWasActive = false;
+        if (holdId && packageId && date && date !== 'sin-fecha') {
+          const holdRef = doc(db, 'reservationHolds', holdId);
+          holdSnap = await tx.get(holdRef);
+          if (holdSnap.exists()) {
+            const holdData: any = holdSnap.data();
+            holdWasActive = String(holdData?.status ?? '') === 'active';
+            if (holdWasActive && (isApproved || shouldReleaseHold)) {
+              lockRef = doc(db, 'stockHolds', `${packageId}_${date}`);
+              lockSnap = await tx.get(lockRef);
+            }
+          }
+        }
+
+        const nextAttemptAtVoucher = computeVoucherNextAttemptAt({ date, now });
         const shouldQueueVoucher = Boolean(date && date !== 'sin-fecha');
+
+        // El código ya fue reservado antes de la tx (variable externa
+        // `reservationCode`). No se toca el contador acá.
+
+        // ============================================
+        // FASE 2: TODAS LAS ESCRITURAS
+        // ============================================
 
         if (!reservaSnap.exists()) {
           // Crear nueva reserva
@@ -1300,7 +1522,6 @@ export async function POST(request: Request) {
             }
           }
 
-          const reservationCode = await reserveNextReservationCodeInTransaction(tx);
           tx.set(reservaRef, {
             packageId,
             packageSlug,
@@ -1311,7 +1532,6 @@ export async function POST(request: Request) {
             experienceTitle: finalPackageTitle,
             date,
             people,
-            roomType: intentData.roomType ? String(intentData.roomType) : null,
             selectedExtras: Array.isArray((intentData as any).selectedExtras) ? (intentData as any).selectedExtras : null,
             baseSubtotalAmount:
               typeof (intentData as any).baseSubtotalAmount === 'number'
@@ -1336,13 +1556,13 @@ export async function POST(request: Request) {
             customerNameLower: (customerName || '').trim().toLowerCase() || null,
             customerPhone: customerPhone || null,
             customerPhoneNormalized: normalizeDigits(customerPhone),
-            customerCountry: payer?.address?.country || null,
+            customerCountry: customerCountry || null,
             customerDocument: customerDocument || null,
             customerDocumentNormalized: normalizeDigits(customerDocument),
             customerBirthDate,
+            customerAge,
+            customerHotel,
             customerComments: intentComments || null,
-            customerNationality: intentNationality || null,
-            customerDietaryRestrictions: intentDietaryRestrictions || null,
             passengerDetails,
             reservationCode,
             status: isPixPending ? 'pending' : reservationStatus,
@@ -1467,45 +1687,39 @@ export async function POST(request: Request) {
           });
         }
 
-        if (holdId && packageId && date && date !== 'sin-fecha') {
+        // Actualizar hold y lock
+        if (holdWasActive && (isApproved || shouldReleaseHold)) {
           const holdRef = doc(db, 'reservationHolds', holdId);
-          const holdSnap = await tx.get(holdRef);
-          if (holdSnap.exists()) {
-            const holdData: any = holdSnap.data();
-            const holdStatus = String(holdData?.status ?? '');
-            const holdWasActive = holdStatus === 'active';
-            if (holdWasActive && isApproved) {
-              tx.update(holdRef, { status: 'consumed', consumedAt: now, paymentId: String(paymentId), updatedAt: now });
-            } else if (holdWasActive && shouldReleaseHold) {
-              tx.update(holdRef, { status: 'released', releasedAt: now, paymentId: String(paymentId), updatedAt: now });
-            }
+          if (isApproved) {
+            tx.update(holdRef, { status: 'consumed', consumedAt: now, paymentId: String(paymentId), updatedAt: now });
+          } else if (shouldReleaseHold) {
+            tx.update(holdRef, { status: 'released', releasedAt: now, paymentId: String(paymentId), updatedAt: now });
+          }
 
-            if (holdWasActive && (isApproved || shouldReleaseHold)) {
-              const lockRef = doc(db, 'stockHolds', `${packageId}_${date}`);
-              const lockSnap = await tx.get(lockRef);
-              const heldPeople = lockSnap.exists() ? Number((lockSnap.data() as any)?.heldPeople ?? 0) : 0;
-              if (!lockSnap.exists()) {
-                tx.set(lockRef, { packageId, date, heldPeople: 0, createdAt: now, updatedAt: now });
-              } else {
-                tx.update(lockRef, { heldPeople: Math.max(0, Math.floor(heldPeople - people)), updatedAt: now });
-              }
-            }
+          if (lockSnap && lockSnap.exists()) {
+            const heldPeople = Number((lockSnap.data() as any)?.heldPeople ?? 0);
+            tx.update(lockRef, { heldPeople: Math.max(0, Math.floor(heldPeople - people)), updatedAt: now });
+          } else {
+            tx.set(lockRef, { packageId, date, heldPeople: 0, createdAt: now, updatedAt: now });
           }
         }
 
-        // Email al cliente (solo si aprobado)
+        // Email al cliente (solo si aprobado). Si el envío inmediato
+        // funcionó, el job nace como "sent"; si no, "pending" para el cron.
         if (!emailClienteConfirmSnap.exists() && customerEmail && isApproved) {
           tx.set(emailClienteConfirmRef, {
             type: 'cliente_confirmacion_compra',
-            status: 'pending',
+            status: directSend.confirm ? 'sent' : 'pending',
             to: customerEmail,
             from,
             replyTo,
             subject: `Compra confirmada: ${finalPackageTitle || SITE_NAME}`,
             html: htmlConfirm,
             text: textConfirm,
-            attempts: 0,
+            attempts: directSend.confirm ? 1 : 0,
             lastError: null,
+            providerMessageId: directSend.confirm ?? null,
+            sentAt: directSend.confirm ? now : null,
             mercadoPagoPaymentId: String(paymentId),
             reservationId,
             nextAttemptAt: now,
@@ -1517,15 +1731,17 @@ export async function POST(request: Request) {
         if (!emailClienteVoucherSnap.exists() && customerEmail && isApproved && shouldQueueVoucher) {
           tx.set(emailClienteVoucherRef, {
             type: 'cliente_voucher_48hs',
-            status: 'pending',
+            status: directSend.voucher ? 'sent' : 'pending',
             to: customerEmail,
             from,
             replyTo,
             subject: `Recordatorio de salida (48 hs): ${finalPackageTitle || SITE_NAME}`,
             html: htmlVoucher,
             text: textVoucher,
-            attempts: 0,
+            attempts: directSend.voucher ? 1 : 0,
             lastError: null,
+            providerMessageId: directSend.voucher ?? null,
+            sentAt: directSend.voucher ? now : null,
             mercadoPagoPaymentId: String(paymentId),
             reservationId,
             nextAttemptAt: nextAttemptAtVoucher,
@@ -1538,15 +1754,17 @@ export async function POST(request: Request) {
         if (!emailAdminSnap.exists() && CONTACT_INFO.email && isApproved) {
           tx.set(emailAdminRef, {
             type: 'admin_aviso',
-            status: 'pending',
+            status: directSend.admin ? 'sent' : 'pending',
             to: CONTACT_INFO.email,
             from,
             replyTo,
             subject: `Nueva reserva: ${finalPackageTitle || 'Paquete'} — ${customerName || customerEmail}`,
             html: htmlAdmin,
             text: textAdmin,
-            attempts: 0,
+            attempts: directSend.admin ? 1 : 0,
             lastError: null,
+            providerMessageId: directSend.admin ?? null,
+            sentAt: directSend.admin ? now : null,
             mercadoPagoPaymentId: String(paymentId),
             reservationId,
             nextAttemptAt: now,

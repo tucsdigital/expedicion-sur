@@ -113,6 +113,7 @@ export default function VendorReservasPage() {
                         <th className="px-4 py-3 text-left font-medium">Venta</th>
                         <th className="px-4 py-3 text-left font-medium">Comisión</th>
                         <th className="px-4 py-3 text-left font-medium">Estado</th>
+                        <th className="px-4 py-3 text-left font-medium">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -124,6 +125,9 @@ export default function VendorReservasPage() {
                           <td className="px-4 py-3">{(r.amountTotal/100).toLocaleString()} {r.currency?.toUpperCase?.()}</td>
                           <td className="px-4 py-3">{r.referredBy ? (r.referredBy.commissionAmount/100).toLocaleString() : '-'}</td>
                           <td className="px-4 py-3">{r.referredBy ? <Badge variant="outline" className="capitalize">{r.referredBy.payoutStatus}</Badge> : '-'}</td>
+                          <td className="px-4 py-3">
+                            <a href={`/vendedor/reservas/${r.id}`} className="text-primary text-sm hover:underline">Editar</a>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

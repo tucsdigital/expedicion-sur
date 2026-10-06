@@ -1,0 +1,186 @@
+{
+  "branding": {
+    "siteName": "Expedición Sur",
+    "siteDescription": "Experiencias auténticas, experiencias, traslados y paquetes personalizados para descubrir el sur argentino.",
+    "siteUrlDefault": "https://expedicionsur.com",
+    "logo": {
+      "imagePath": "/images/logo-expedicion-sur.png",
+      "imageUrl": "/images/logo-expedicion-sur.png",
+      "titleText": "Expedición Sur",
+      "altTextTemplate": "{{siteName}} Logo"
+    },
+    "palette": {
+      "primary": "#E30613",
+      "secondary": "#CBBBA0",
+      "success": "#CA9E67",
+      "successStrong": "#8E6B45",
+      "dark": "#111111",
+      "cream": "#F7F2EA"
+    }
+  },
+  "company": {
+    "adminEmailDefault": "reservas@expedicionsur.com",
+    "whatsappMessageDefault": "Hola! Quiero reservar una experiencia en Patagonia:",
+    "contact": {
+      "direccion": "El Calafate, Santa Cruz, Argentina",
+      "horario": "08:00 a 21:00 hs",
+      "email": "reservas@expedicionsur.com",
+      "telefono": "+54 9 2966 243032",
+      "whatsappNumber": "5492966243032",
+      "mapUrl": "https://www.google.com/maps?q=El+Calafate,+Santa+Cruz,+Argentina&output=embed"
+    },
+    "social": {
+      "facebook": "",
+      "instagram": "https://www.instagram.com/expedicionsur.fte",
+      "instagramHandle": "@expedicionsur.fte",
+      "threads": "",
+      "tiktok": "",
+      "email": "mailto:reservas@expedicionsur.com"
+    },
+    "legal": {
+      "razonSocial": "",
+      "cuit": "",
+      "legajoRnav": ""
+    },
+    "developerCredits": {
+      "name": "Tucs Digital",
+      "url": ""
+    }
+  },
+  "features": {
+    "showContactMap": true
+  },
+  "seo": {
+    "locale": "es_AR",
+    "titleDefaultTemplate": "{{siteName}}",
+    "titleTemplate": "%s | {{siteName}}",
+    "openGraphImagePath": "/images/logo-expedicion-sur.png",
+    "keywords": [
+      "expedicion sur",
+      "patagonia",
+      "experiencias en patagonia",
+      "perito moreno",
+      "el chalten",
+      "ushuaia",
+      "viajes patagonia",
+      "turismo sur argentino"
+    ]
+  },
+  "content": {
+    "homeHero": {
+      "badge": "Explorá",
+      "titlePrefix": "",
+      "titleAccent": "Expedición Sur",
+      "subtitleTemplate": "Experiencias auténticas, experiencias, traslados y paquetes personalizados para descubrir el sur argentino."
+    },
+    "packagesSection": {
+      "badge": "Experiencias",
+      "title": "Experiencias destacadas",
+      "subtitleTemplate": "Encontrá tu próxima escapada con {{siteName}}."
+    },
+    "services": {
+      "badge": "Servicios",
+      "titlePrefix": "Nuestros",
+      "titleAccent": "Servicios",
+      "subtitle": "Te acompañamos antes, durante y después de tu viaje.",
+      "items": [
+        {
+          "icon": "MountainSnow",
+          "title": "Tour Glaciar Perito Moreno",
+          "desc": "Excursión para conocer uno de los glaciares más importantes del mundo con servicio organizado y atención personalizada."
+        },
+        {
+          "icon": "Route",
+          "title": "Full Day El Chalten - Laguna de los Tres",
+          "desc": "Experiencia ideal para quienes desean recorrer uno de los senderos más emblemáticos de la Patagonia."
+        },
+        {
+          "icon": "Compass",
+          "title": "Full Day El Chalten Classic",
+          "desc": "Recorrido completo para descubrir los principales atractivos de El Chaltén en una jornada."
+        },
+        {
+          "icon": "ShipWheel",
+          "title": "Excursion Todos los Glaciares",
+          "desc": "Navegación entre glaciares con paisajes únicos y naturaleza en estado puro."
+        }
+      ]
+    },
+    "values": {
+      "badge": "Valores",
+      "title": "¿Por qué elegirnos?",
+      "subtitle": "Confianza, experiencia y atención personalizada.",
+      "items": [
+        {
+          "icon": "Users",
+          "number": "01",
+          "title": "Atención personalizada",
+          "desc": "Cada viaje se adapta a las necesidades del pasajero."
+        },
+        {
+          "icon": "MapPinned",
+          "number": "02",
+          "title": "Experiencia local",
+          "desc": "Conocemos la Patagonia porque vivimos en ella."
+        },
+        {
+          "icon": "ShieldCheck",
+          "number": "03",
+          "title": "Seguridad",
+          "desc": "Operadores y logística planificada."
+        },
+        {
+          "icon": "BadgeCheck",
+          "number": "04",
+          "title": "Calidad",
+          "desc": "Buscamos superar las expectativas."
+        },
+        {
+          "icon": "Sparkles",
+          "number": "05",
+          "title": "Flexibilidad",
+          "desc": "Opciones individuales, grupales y privadas."
+        },
+        {
+          "icon": "HeartHandshake",
+          "number": "06",
+          "title": "Compromiso",
+          "desc": "Acompañamos al viajero antes, durante y después del viaje."
+        }
+      ]
+    },
+    "about": {
+      "badge": "Sobre Nosotros",
+      "titlePrefix": "Nuestra",
+      "titleAccent": "historia",
+      "image": {
+        "src": "/images/hero1.webp",
+        "altTemplate": "Equipo de {{siteName}}"
+      },
+      "paragraphs": [
+        "Inspirados en la Loica, símbolo de orientación y conexión con la naturaleza, nuestro objetivo es brindar servicios turísticos de calidad que conecten a cada viajero con la auténtica Patagonia.",
+        "Nos enfocamos en ofrecer experiencias memorables, seguras y personalizadas, destacándonos por la calidez en la atención, el conocimiento del territorio y el compromiso con el entorno.",
+        "Queremos ser la elección preferida de quienes buscan descubrir el sur de manera distinta: con propósito, emoción y confianza."
+      ]
+    },
+    "contactBlock": {
+      "badge": "Contacto",
+      "titlePrefix": "Hablemos",
+      "titleAccent": "hoy",
+      "subtitle": "Escribinos por WhatsApp o email y te respondemos a la brevedad."
+    },
+    "contactForm": {
+      "title": "Escribinos",
+      "subtitle": "Contanos tu idea de viaje y te ayudamos a armarla.",
+      "whatsappCta": "Abrir WhatsApp",
+      "image": {
+        "src": "/images/3.jpg",
+        "altTemplate": "{{siteName}}"
+      }
+    },
+    "footer": {
+      "taglineTemplate": "{{siteDescription}}",
+      "copyrightTemplate": "© {{year}} {{logoTitleText}}. Todos los derechos reservados."
+    }
+  }
+}

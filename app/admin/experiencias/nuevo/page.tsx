@@ -185,6 +185,7 @@ export default function NuevoPaquetePage() {
           tagItems: editor.tagItems,
           noIncludeItems: editor.noIncludeItems,
           condicionesItems: editor.condicionesItems,
+          addons: editor.addons,
           salidas: editor.salidas,
           fechaVencimiento: editor.fechaVencimiento,
           imageData: {
@@ -207,6 +208,26 @@ export default function NuevoPaquetePage() {
           },
         }),
       };
+
+      // Subir imágenes de adicionales (dataURL) y reinyectar URLs finales
+      const dataUrlAddons = editor.addons.filter((addon) => addon.image.startsWith('data:'));
+      if (dataUrlAddons.length > 0) {
+        toast.info('Subiendo imágenes de adicionales...', { id: 'upload-addons' });
+        const addonFiles = dataUrlAddons.map((addon, index) =>
+          dataURLtoFile(addon.image, `paquete-addon-${Date.now()}-${index}.jpg`)
+        );
+        const addonResults = await uploadMultipleImages(addonFiles);
+        const urlById = new Map<string, { url: string; key: string }>();
+        dataUrlAddons.forEach((addon, index) => {
+          const result = addonResults[index];
+          if (result) urlById.set(addon.id, result);
+        });
+        (sanitizedData as any).addons = ((sanitizedData as any).addons ?? []).map((addon: any) => {
+          const uploaded = urlById.get(String(addon?.id ?? ''));
+          return uploaded ? { ...addon, image: uploaded.url, imageKey: uploaded.key } : addon;
+        });
+        toast.success('Imágenes de adicionales listas', { id: 'upload-addons' });
+      }
 
       await addDoc(collection(db, 'paquetes'), sanitizedData);
       await revalidateFrontPaths(['/experiencias', `/experiencia/${slug}`]);
@@ -278,6 +299,8 @@ export default function NuevoPaquetePage() {
               onNoIncludeItemsChange={editor.setNoIncludeItems}
               condicionesItems={editor.condicionesItems}
               onCondicionesItemsChange={editor.setCondicionesItems}
+              addons={editor.addons}
+              onAddonsChange={editor.setAddons}
               salidas={editor.salidas}
               onSalidasChange={editor.setSalidas}
               imagenTarjetaPreview={editor.imagenTarjetaPreview}

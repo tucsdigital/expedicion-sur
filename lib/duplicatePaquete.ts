@@ -160,7 +160,6 @@ export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqu
   const clonedItinerarioSteps = Array.isArray(original.itinerarioSteps) ? deepClone(original.itinerarioSteps) : original.itinerarioSteps;
   const clonedBookingConfig = original.bookingConfig ? deepClone(original.bookingConfig) : original.bookingConfig;
   const clonedReservationPricing = original.reservationPricing ? deepClone(original.reservationPricing) : original.reservationPricing;
-  const clonedPickupPointsConfig = Array.isArray(original.pickupPointsConfig) ? deepClone(original.pickupPointsConfig) : original.pickupPointsConfig;
   const clonedTarjetaKey = original.imagenTarjeta ? clonedAssets.get(original.imagenTarjeta)?.key ?? original.imagenTarjetaKey : original.imagenTarjetaKey;
   const clonedPortadaKey = original.imagenPortada ? clonedAssets.get(original.imagenPortada)?.key ?? original.imagenPortadaKey : original.imagenPortadaKey;
   const clonedPortadaMobileKey = original.imagenPortadaMobile ? clonedAssets.get(original.imagenPortadaMobile)?.key ?? original.imagenPortadaMobileKey : original.imagenPortadaMobileKey;
@@ -184,8 +183,6 @@ export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqu
     itinerarioSteps: clonedItinerarioSteps,
     bookingConfig: clonedBookingConfig,
     reservationPricing: clonedReservationPricing,
-    pickupPoints: [...(original.pickupPoints || [])],
-    pickupPointsConfig: clonedPickupPointsConfig,
     galeria: (original.galeria || []).map((url) => clonedAssets.get(url)?.url || url),
     galeriaKeys: (original.galeria || []).map(
       (url, idx) => clonedAssets.get(url)?.key || original.galeriaKeys?.[idx] || ''

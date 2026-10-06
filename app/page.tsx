@@ -17,6 +17,7 @@ export default async function Home() {
       paquetes={data.paquetes}
       productosOrdenados={data.productosOrdenados}
       categoriasDestacadas={data.categoriasDestacadas}
+      searchData={data.searchData}
       banners={data.banners}
       blogPosts={data.blogPosts}
       experiencias={data.experiencias}

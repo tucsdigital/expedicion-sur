@@ -71,16 +71,13 @@ export default function Navbar({ reserveSpace = false }: NavbarProps) {
 
   return (
     <>
-      {reserveSpace ? (
-        <div aria-hidden style={{ height: navHeight }} className="w-full" />
-      ) : null}
-
       <nav
         ref={navRef as React.RefObject<HTMLElement>}
-        className="fixed inset-x-0 top-0 z-[120] px-4 py-4 md:px-6 lg:px-8"
+        className="fixed inset-x-0 top-0 z-[120] py-4"
       >
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
         <div
-          className={`mx-auto flex max-w-7xl items-center justify-between rounded-full border px-4 py-3 transition duration-300 md:px-5 ${
+          className={`flex items-center justify-between rounded-full border px-4 py-3 transition duration-300 md:px-5 ${
             isScrolled
               ? 'border-[rgba(17,17,17,0.08)] bg-white/86 shadow-[0_20px_50px_rgba(17,17,17,0.08)] backdrop-blur-xl'
               : 'border-white/40 bg-white/72 shadow-[0_18px_40px_rgba(17,17,17,0.05)] backdrop-blur-xl'
@@ -136,7 +133,7 @@ export default function Navbar({ reserveSpace = false }: NavbarProps) {
         </div>
 
         {mobileMenuOpen ? (
-          <div className="mx-auto mt-3 max-w-7xl rounded-[28px] border border-[rgba(17,17,17,0.08)] bg-white/94 p-5 shadow-[0_24px_60px_rgba(17,17,17,0.12)] backdrop-blur-2xl lg:hidden">
+          <div className="mt-3 rounded-[28px] border border-[rgba(17,17,17,0.08)] bg-white/94 p-5 shadow-[0_24px_60px_rgba(17,17,17,0.12)] backdrop-blur-2xl lg:hidden">
             <div className="space-y-2">
               {links.map((link) => (
                 <Link
@@ -161,6 +158,7 @@ export default function Navbar({ reserveSpace = false }: NavbarProps) {
             </a>
           </div>
         ) : null}
+        </div>
       </nav>
     </>
   );

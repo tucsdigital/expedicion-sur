@@ -4,10 +4,9 @@ import type { PaqueteItineraryStep } from '@/types';
 type Props = {
   steps?: PaqueteItineraryStep[] | null;
   html?: string | null;
-  visible?: boolean | null;
 };
 
-export default function PaqueteItinerary({ steps, html, visible }: Props) {
+export default function PaqueteItinerary({ steps, html }: Props) {
   const normalizedSteps = (Array.isArray(steps) ? steps : [])
     .map((step) => ({
       id: String(step?.id ?? '').trim(),
@@ -17,14 +16,12 @@ export default function PaqueteItinerary({ steps, html, visible }: Props) {
     .filter((step) => Boolean(step.id) && (Boolean(step.titulo) || Boolean(step.descripcion)));
 
   const normalizedHtml = sanitizePackageRichHtml(html);
-  if (!visible) return null;
   if (normalizedSteps.length === 0 && !normalizedHtml) return null;
 
   return (
     <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-4">
         <h3 className="text-xl font-bold tracking-[-0.02em] text-black">Itinerario</h3>
-        <p className="mt-1 text-sm text-gray-600">Consultá el programa completo de la excursión antes de reservar.</p>
       </div>
 
       {normalizedSteps.length > 0 ? (

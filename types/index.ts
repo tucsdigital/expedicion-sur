@@ -35,22 +35,13 @@ export interface Salida {
   seatLayoutId?: string;
 }
 
-export type PickupPointItem = {
-  label: string;
-  time: string;
-  hasExtra?: boolean;
-  extraAmount?: number;
-};
-
-export type ReservationRoomType = 'matrimonial' | 'twin' | 'full-day';
-
-export type ReservationExtraCode = 'cocheCama' | 'panoramicos' | 'cafeteras' | 'pickupPoint' | 'administrativeFee';
+export type ReservationExtraCode = 'cocheCama' | 'panoramicos' | 'cafeteras' | 'packageAddon' | 'manualExtra';
 
 export type ReservationExtraSelection = {
   code: ReservationExtraCode;
   label: string;
   amount: number;
-  source?: 'seatLayout' | 'pickupPoint' | string | null;
+  source?: 'seatLayout' | string | null;
   scope?: 'per_person' | 'per_booking' | string | null;
 };
 
@@ -99,6 +90,23 @@ export interface PaqueteCondicion {
   texto: string;
 }
 
+/**
+ * Adicional vendible de un paquete (ecosistema de upsell en el modal de reserva).
+ * Precio en moneda mayor (ej. 15000 = $15.000 ARS); la imagen es URL pública o dataURL en edición.
+ */
+export interface PackageAddon {
+  id: string;
+  title: string;
+  description: string;
+  /** Precio total por reserva (una sola vez, no por persona). */
+  price: number;
+  /** URL pública de la imagen de tarjeta. */
+  image?: string;
+  /** Clave del blob en storage (para limpieza al reemplazar/eliminar). */
+  imageKey?: string | null;
+  enabled: boolean;
+}
+
 // FaqItem is re-exported from landing-reserva/types
 export interface PaqueteBookingConfig {
   enabled: boolean;
@@ -121,6 +129,8 @@ export interface PaqueteBookingConfig {
     seatLayoutId?: string;
   }>;
   maxPeoplePerBooking?: number;
+  /** Anticipación mínima (en horas) para reservar una fecha. Default 48. 0 = sin mínimo. */
+  minLeadHours?: number;
   currency: 'ars' | 'usd' | 'brl';
   depositAmount: number;
   paymentMethods: {
@@ -167,7 +177,6 @@ export interface Paquete {
   tipo: string;
   tipos?: string[];
   precio: number;
-  gastosAdministrativos?: number;
   precioDescuentoPrimerosCupos?: number;
   tarifaEspecialFechaLimite?: string;
   moneda: 'USD' | 'ARS' | 'EUR';
@@ -184,8 +193,6 @@ export interface Paquete {
   reservationPricing?: ReservationPricingConfig;
   seatSelectionEnabled?: boolean;
   seatLayoutId?: string;
-  pickupPoints?: string[];
-  pickupPointsConfig?: PickupPointItem[];
   fechaVencimiento?: string;
   mostrarDesde: boolean;
   duracion: string;
@@ -207,6 +214,8 @@ export interface Paquete {
   galeriaKeys?: string[];
   tickets?: TicketPack[];
   condiciones?: PaqueteCondicion[];
+  /** Adicionales vendibles del paquete (ecosistema upsell). Máx. 20. */
+  addons?: PackageAddon[];
   visible: boolean;
   destacado: boolean;
   fechaCreacion: Timestamp | Date;
@@ -241,9 +250,6 @@ export interface CartItem {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
-  pickupPoint?: string | null;
-  pickupPointTime?: string | null;
-  roomType?: ReservationRoomType | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   unitAmount: number;
   pricingMode?: ReservationPricingMode | null;
@@ -276,9 +282,6 @@ export interface ReservationHold {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
-  pickupPoint?: string | null;
-  pickupPointTime?: string | null;
-  roomType?: ReservationRoomType | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   pricingMode?: ReservationPricingMode | null;
   pricingBaseUnitAmount?: number | null;
@@ -320,9 +323,6 @@ export interface OrderItemSnapshot {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
-  pickupPoint?: string | null;
-  pickupPointTime?: string | null;
-  roomType?: ReservationRoomType | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   unitAmount: number;
   pricingMode?: ReservationPricingMode | null;

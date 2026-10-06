@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { getReservaById, getReservaPayments, type ReservaPaymentEvent } from '@/lib/reservas';
 import type {
@@ -19,29 +20,42 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  FileText,
-  Globe,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  ArrowLeft,
+  CalendarDays,
+  CreditCard,
   Loader2,
   Mail,
   MailCheck,
+  MapPin,
   Paperclip,
-  Receipt,
   Plus,
+  ReceiptText,
+  Store,
+  Ticket,
   Trash2,
   UploadCloud,
   Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import Link from 'next/link';
 import type { Vendor, ReferralLink } from '@/types/vendor';
 import { getVendors, getReferralLinksByVendor } from '@/lib/vendors';
-import {
-  buildVentaStatuses,
-  deriveAdminEmailStatus,
-  deriveCustomerConfirmationEmailStatus,
-  deriveVoucherStatus,
-  ventaStatusLabel,
-} from '@/lib/sales/status';
+import { getAllPaquetesAdmin } from '@/lib/paquetes';
+import { getPackageAddonOptions } from '@/lib/packages/resolve-departure';
+import { getCountryByName } from '@/lib/countries';
+import { buildVentaStatuses, ventaStatusLabel } from '@/lib/sales/status';
+import { computeVentaFinance, financeStatusLabel, type VentaFinance } from '@/lib/sales/finance';
+
+/* ---------------------------------- types --------------------------------- */
 
 const reservationStatusOptions: { value: ReservationStatus; label: string }[] = [
   { value: 'pending', label: 'Pendiente' },
@@ -50,126 +64,87 @@ const reservationStatusOptions: { value: ReservationStatus; label: string }[] = 
   { value: 'cancelled', label: 'Cancelada' },
 ];
 
-type StockSummary = {
-  baseCapacity: number;
-  available: number;
-  movements: StockMovement[];
-};
-
+type StockSummary = { baseCapacity: number; available: number; movements: StockMovement[] };
 type PaymentMovementType = 'payment' | 'extra' | 'discount' | 'refund' | 'adjustment';
+type PaymentFormState = { movementType: PaymentMovementType; amount: string; method: string; reference: string; message: string };
 
-type PaymentFormState = {
-  movementType: PaymentMovementType;
-  amount: string;
-  method: string;
-  reference: string;
-  message: string;
-};
+/* --------------------------------- helpers -------------------------------- */
 
 const formatDate = (date: unknown): string => {
   if (!date) return '—';
-  if (typeof date === 'string')
-    return new Date(date).toLocaleDateString('es-AR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
-  const d =
-    typeof date === 'object' &&
-    date !== null &&
-    'toDate' in date
-      ? (date as { toDate: () => Date }).toDate()
-      : new Date(date as Date);
-  return d.toLocaleDateString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  try {
+    const d =
+      typeof date === 'string'
+        ? new Date(`${date}T12:00:00`)
+        : typeof date === 'object' && date !== null && 'toDate' in date
+          ? (date as { toDate: () => Date }).toDate()
+          : new Date(date as Date);
+    if (Number.isNaN(d.getTime())) return typeof date === 'string' ? date : '—';
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))
+      return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch {
+    return '—';
+  }
 };
 
 const formatDateTime = (date: unknown): string => {
   if (!date) return '—';
-  if (typeof date === 'string')
-    return new Date(date).toLocaleString('es-AR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  const d =
-    typeof date === 'object' &&
-    date !== null &&
-    'toDate' in date
-      ? (date as { toDate: () => Date }).toDate()
-      : new Date(date as Date);
-  return d.toLocaleString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  try {
+    const d =
+      typeof date === 'string'
+        ? new Date(date)
+        : typeof date === 'object' && date !== null && 'toDate' in date
+          ? (date as { toDate: () => Date }).toDate()
+          : new Date(date as Date);
+    return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '—';
+  }
 };
 
-const toTimestampMs = (value: unknown): number => {
+const toMs = (value: unknown): number => {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return new Date(value).getTime();
-  if (value && typeof value === 'object' && 'toDate' in value) {
-    const asDate = (value as { toDate: () => Date }).toDate();
-    return asDate.getTime();
-  }
-  if (value && typeof value === 'object' && 'seconds' in value) {
-    return ((value as { seconds: number }).seconds ?? 0) * 1000;
-  }
+  if (value && typeof value === 'object' && 'toDate' in value) return (value as { toDate: () => Date }).toDate().getTime();
+  if (value && typeof value === 'object' && 'seconds' in value) return ((value as { seconds: number }).seconds ?? 0) * 1000;
   return 0;
 };
 
-const formatAmount = (amountTotal: number, currency: string): string => {
-  const value = amountTotal / 100;
-  if (currency.toUpperCase() === 'ARS') return `$${value.toLocaleString('es-AR')}`;
-  if (currency.toUpperCase() === 'BRL') return `R$ ${value.toLocaleString('pt-BR')}`;
-  return `${value.toFixed(2)} ${currency.toUpperCase()}`;
+const formatAmount = (cents: number, currency: string): string => {
+  const value = (Number(cents) || 0) / 100;
+  const cur = String(currency || 'ARS').toUpperCase();
+  if (cur === 'ARS') return `$${value.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`;
+  if (cur === 'BRL') return `R$ ${value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
+  if (cur === 'USD') return `USD ${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  return `${value.toFixed(2)} ${cur}`;
 };
 
-const statusBadgeVariant: Record<ReservationStatus, 'default' | 'outline' | 'destructive' | 'secondary'> = {
+const commercialBadge: Record<ReservationStatus, 'default' | 'outline' | 'destructive' | 'secondary'> = {
   pending: 'outline',
   reserved: 'secondary',
   completed: 'default',
   cancelled: 'destructive',
 };
 
-const emailStatusLabel = (status: string) =>
-  status === 'sent'
-    ? 'Enviado'
-    : status === 'queued'
-      ? 'En cola'
-      : status === 'sending'
-        ? 'Enviando'
-        : status === 'failed'
-          ? 'Fallido'
-          : 'Sin enviar';
+const financeBadge = (f: VentaFinance): 'default' | 'outline' | 'destructive' | 'secondary' =>
+  f.status === 'settled' ? 'default' : f.status === 'overpaid' ? 'secondary' : f.status === 'partial' ? 'outline' : 'outline';
 
-const voucherStatusLabel = (status: string) =>
-  status === 'sent'
-    ? 'Voucher enviado'
-    : status === 'generated'
-      ? 'Voucher generado'
-      : status === 'queued'
-        ? 'Voucher en cola'
-        : status === 'failed'
-          ? 'Voucher fallido'
-          : 'Sin voucher';
+const emailLabel = (s: string) =>
+  s === 'sent' ? 'Enviado' : s === 'queued' ? 'En cola' : s === 'sending' ? 'Enviando' : s === 'failed' ? 'Fallido' : 'Sin enviar';
 
-const paymentMovementLabels: Record<PaymentMovementType, string> = {
-  payment: 'Pago recibido',
+const voucherLabel = (s: string) =>
+  s === 'sent' ? 'Enviado' : s === 'generated' ? 'Generado' : s === 'queued' ? 'En cola' : s === 'failed' ? 'Fallido' : 'Sin voucher';
+
+const movementLabels: Record<PaymentMovementType, string> = {
+  payment: 'Pago',
   extra: 'Extra',
   discount: 'Descuento',
   refund: 'Reintegro',
   adjustment: 'Ajuste',
 };
 
-const paymentMethodLabels: Record<string, string> = {
+const methodLabels: Record<string, string> = {
   mercadopago: 'Mercado Pago',
   admin: 'Manual',
   cash: 'Efectivo',
@@ -178,75 +153,74 @@ const paymentMethodLabels: Record<string, string> = {
   other: 'Otro',
 };
 
-const reservationStatusText = (status: ReservationStatus): string =>
-  reservationStatusOptions.find((option) => option.value === status)?.label ?? status;
-
-const normalizePaymentMovementType = (payment: ReservaPaymentEvent): PaymentMovementType => {
-  const value = String(payment.movementType ?? '').trim().toLowerCase();
-  if (value === 'extra' || value === 'discount' || value === 'refund' || value === 'adjustment') {
-    return value;
-  }
-  return 'payment';
+const methodLabel = (v: string | null | undefined): string => {
+  const k = String(v ?? '').trim().toLowerCase();
+  return methodLabels[k] ?? (k ? k.charAt(0).toUpperCase() + k.slice(1) : '—');
 };
 
-const paymentMethodLabel = (value: string | null | undefined): string => {
-  const key = String(value ?? '').trim().toLowerCase();
-  return paymentMethodLabels[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : 'Sin definir');
+const movementOf = (p: ReservaPaymentEvent): PaymentMovementType => {
+  const v = String(p.movementType ?? '').trim().toLowerCase();
+  return v === 'extra' || v === 'discount' || v === 'refund' || v === 'adjustment' ? v : 'payment';
 };
 
-const paymentDateLabel = (payment: ReservaPaymentEvent): string =>
-  formatDateTime(payment.occurredAt ?? payment.createdAt);
-
-const roomTypeLabel = (value: string | null | undefined): string => {
-  if (value === 'matrimonial') return 'Matrimonial';
-  if (value === 'twin') return 'Twin';
-  if (value === 'full-day') return 'Full day';
-  return '—';
-};
-
-const moneyInputToCents = (value: string): number => {
-  const normalized = value.replace(/\./g, '').replace(',', '.').trim();
-  const amount = Number(normalized);
+const moneyToCents = (value: string): number => {
+  const amount = Number(value.replace(/\./g, '').replace(',', '.').trim());
   if (!Number.isFinite(amount) || amount <= 0) return 0;
   return Math.round(amount * 100);
 };
+
+const Eyebrow = ({ children }: { children: React.ReactNode }) => (
+  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{children}</p>
+);
+
+const Card = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
+  <section className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5 ${className}`}>{children}</section>
+);
+
+/* ---------------------------------- page ---------------------------------- */
 
 export default function ReservaDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+
   const [reserva, setReserva] = useState<Reservation | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<ReservationStatus>('completed');
   const [statusNote, setStatusNote] = useState('');
-  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [attachments, setAttachments] = useState<ReservationAttachment[]>([]);
-  const [uploadingAttachments, setUploadingAttachments] = useState(false);
-  const [manualHistory, setManualHistory] = useState<Reservation[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [stockSummary, setStockSummary] = useState<StockSummary | null>(null);
-  const [stockLoading, setStockLoading] = useState(false);
-  const [removingAttachmentIds, setRemovingAttachmentIds] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [removingIds, setRemovingIds] = useState<string[]>([]);
   const [payments, setPayments] = useState<ReservaPaymentEvent[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [stock, setStock] = useState<StockSummary | null>(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [otherPurchases, setOtherPurchases] = useState<Reservation[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vendorId, setVendorId] = useState<string>('');
-  const [referralLinks, setReferralLinks] = useState<ReferralLink[]>([]);
-  const [referralLinksLoading, setReferralLinksLoading] = useState(false);
-  const [selectedReferralCode, setSelectedReferralCode] = useState<string>('');
-  const [manualReferralCode, setManualReferralCode] = useState<string>('');
-  const [updatingReferral, setUpdatingReferral] = useState(false);
-  const [savingPaymentEvent, setSavingPaymentEvent] = useState(false);
-  const [paymentForm, setPaymentForm] = useState<PaymentFormState>({
-    movementType: 'payment',
-    amount: '',
-    method: 'transfer',
-    reference: '',
-    message: '',
-  });
+  const [vendorId, setVendorId] = useState('');
+  const [links, setLinks] = useState<ReferralLink[]>([]);
+  const [linksLoading, setLinksLoading] = useState(false);
+  const [pickedCode, setPickedCode] = useState('');
+  const [manualCode, setManualCode] = useState('');
+  const [savingReferral, setSavingReferral] = useState(false);
+  const [savingMovement, setSavingMovement] = useState(false);
+  const [showMovementForm, setShowMovementForm] = useState(false);
+  const [form, setForm] = useState<PaymentFormState>({ movementType: 'payment', amount: '', method: 'transfer', reference: '', message: '' });
+  const [showAddonForm, setShowAddonForm] = useState(false);
+  const [addonCatalog, setAddonCatalog] = useState<
+    Array<{ key: string; packageTitle: string; addon: { id: string; title: string; price: number } }>
+  >([]);
+  const [loadingAddons, setLoadingAddons] = useState(false);
+  const [addonQuery, setAddonQuery] = useState('');
+  const [addonPickedKey, setAddonPickedKey] = useState('');
+  const [addonTitle, setAddonTitle] = useState('');
+  const [addonPrice, setAddonPrice] = useState('');
+  const [savingAddon, setSavingAddon] = useState(false);
 
-  const loadReserva = useCallback(async (options: { showLoading?: boolean } = {}) => {
-    if (options.showLoading) setLoading(true);
+  const load = useCallback(async (withSkeleton = false) => {
+    if (withSkeleton) setLoading(true);
     try {
       const data = await getReservaById(params.id);
       if (!data) {
@@ -258,1348 +232,810 @@ export default function ReservaDetailPage() {
       setStatus(data.status);
       setAttachments(data.attachments ?? []);
       setPaymentsLoading(true);
-      const pay = await getReservaPayments(params.id, { limit: 50 });
-      setPayments(pay);
-    } catch (error) {
-      console.error('Error cargando venta:', error);
+      setPayments(await getReservaPayments(params.id, { limit: 50 }));
+    } catch (e) {
+      console.error(e);
       toast.error('No pudimos cargar la venta');
     } finally {
-      if (options.showLoading) setLoading(false);
+      if (withSkeleton) setLoading(false);
       setPaymentsLoading(false);
     }
   }, [params.id, router]);
 
-  const ventaStatuses = useMemo(() => (reserva ? buildVentaStatuses(reserva) : null), [reserva]);
-  const paymentsCurrency = useMemo(() => {
-    const first = payments.find((p) => typeof p.currency === 'string' && p.currency.trim());
-    return String(first?.currency ?? reserva?.currency ?? 'ars');
-  }, [payments, reserva?.currency]);
-  const referralLinksForReservation = useMemo(() => {
-    const packageId = String(reserva?.packageId ?? reserva?.experienceId ?? '').trim();
-    if (!packageId) return referralLinks;
-    return referralLinks.filter((link) => {
-      const linkPackageId = String(link.packageId ?? link.experienceId ?? '').trim();
-      return !linkPackageId || linkPackageId === packageId;
-    });
-  }, [referralLinks, reserva?.experienceId, reserva?.packageId]);
-  const paymentSummary = useMemo(() => {
-    const baseTotal = Number(reserva?.amountTotal ?? 0);
-    let totalPaid = 0;
-    let totalAdjustments = 0;
-    for (const payment of payments) {
-      const movementType = normalizePaymentMovementType(payment);
-      const amount = Math.max(0, Number(payment.amount ?? 0));
-      if (movementType === 'payment') totalPaid += amount;
-      if (movementType === 'refund') totalPaid -= amount;
-      if (movementType === 'extra' || movementType === 'adjustment') totalAdjustments += amount;
-      if (movementType === 'discount') totalAdjustments -= amount;
-    }
-    const billedTotal = Math.max(0, baseTotal + totalAdjustments);
-    const balance = billedTotal - totalPaid;
-    return { baseTotal, totalAdjustments, billedTotal, totalPaid, balance };
-  }, [payments, reserva?.amountTotal]);
+  useEffect(() => { load(true); }, [load]);
+
+  // Catálogo de adicionales de esta + todas las excursiones (edición de la
+  // venta: permite sumar un adicional creado para otro paquete).
+  useEffect(() => {
+    let off = false;
+    setLoadingAddons(true);
+    getAllPaquetesAdmin()
+      .then((all) => {
+        if (off) return;
+        const entries: Array<{ key: string; packageTitle: string; addon: { id: string; title: string; price: number } }> = [];
+        const currentId = String(reserva?.packageId ?? reserva?.experienceId ?? '');
+        for (const pkg of all) {
+          if (!pkg) continue;
+          const isCurrent = currentId && pkg.id === currentId;
+          const options = getPackageAddonOptions(pkg as any);
+          for (const option of options) {
+            entries.push({
+              key: `${isCurrent ? 'pkg' : 'catalog'}:${pkg.id}:${option.id}`,
+              packageTitle: isCurrent ? 'Esta excursión' : String(pkg.titulo ?? 'Sin título'),
+              addon: { id: option.id, title: option.title, price: option.price },
+            });
+          }
+        }
+        entries.sort((a, b) => a.addon.title.localeCompare(b.addon.title, 'es'));
+        setAddonCatalog(entries);
+      })
+      .catch(() => { if (!off) setAddonCatalog([]); })
+      .finally(() => { if (!off) setLoadingAddons(false); });
+    return () => { off = true; };
+  }, [reserva?.experienceId, reserva?.packageId]);
 
   useEffect(() => {
-    loadReserva({ showLoading: true });
-  }, [loadReserva]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadVendors = async () => {
-      try {
-        const list = await getVendors({ activeOnly: true, limit: 200 });
-        if (!cancelled) setVendors(list);
-      } catch {
-      }
-    };
-    loadVendors();
-    return () => {
-      cancelled = true;
-    };
+    let off = false;
+    getVendors({ activeOnly: true, limit: 200 }).then((l) => { if (!off) setVendors(l); }).catch(() => {});
+    return () => { off = true; };
   }, []);
 
   useEffect(() => {
-    if (!reserva?.referredBy) {
-      setVendorId('');
-      setSelectedReferralCode('');
-      setManualReferralCode('');
-      setReferralLinks([]);
-      return;
-    }
+    if (!reserva?.referredBy) { setVendorId(''); setPickedCode(''); setManualCode(''); setLinks([]); return; }
     setVendorId(reserva.referredBy.vendorId ?? '');
-    setSelectedReferralCode(reserva.referredBy.code ?? '');
-    setManualReferralCode('');
+    setPickedCode(reserva.referredBy.code ?? '');
+    setManualCode('');
   }, [reserva?.referredBy]);
 
   useEffect(() => {
-    let cancelled = false;
-    const loadLinks = async () => {
-      if (!vendorId) {
-        setReferralLinks([]);
-        setReferralLinksLoading(false);
-        return;
-      }
-      setReferralLinksLoading(true);
-      try {
-        const links = await getReferralLinksByVendor(vendorId);
-        if (!cancelled) setReferralLinks(links);
-      } catch {
-        if (!cancelled) setReferralLinks([]);
-      } finally {
-        if (!cancelled) setReferralLinksLoading(false);
-      }
-    };
-    loadLinks();
-    return () => {
-      cancelled = true;
-    };
+    let off = false;
+    if (!vendorId) { setLinks([]); setLinksLoading(false); return; }
+    setLinksLoading(true);
+    getReferralLinksByVendor(vendorId).then((l) => { if (!off) setLinks(l); }).catch(() => { if (!off) setLinks([]); }).finally(() => { if (!off) setLinksLoading(false); });
+    return () => { off = true; };
   }, [vendorId]);
 
-  useEffect(() => {
-    if (!selectedReferralCode || referralLinksLoading) return;
-    const exists = referralLinksForReservation.some((link) => link.code === selectedReferralCode);
-    const currentAssignedCode = String(reserva?.referredBy?.code ?? '').trim();
-    if (!exists && selectedReferralCode !== currentAssignedCode) setSelectedReferralCode('');
-  }, [referralLinksForReservation, referralLinksLoading, reserva?.referredBy?.code, selectedReferralCode]);
-
-  const fetchStockInfo = useCallback(async () => {
+  const fetchStock = useCallback(async () => {
     const packageId = String(reserva?.packageId ?? reserva?.experienceId ?? '').trim();
     const date = String(reserva?.date ?? '').trim();
-    if (!reserva || !user || !packageId || !date || date === 'sin-fecha') {
-      setStockSummary(null);
-      return;
-    }
+    if (!reserva || !user || !packageId || !date || date === 'sin-fecha') { setStock(null); return; }
     setStockLoading(true);
     try {
       const token = await user.getIdToken();
-      const response = await fetch(
-        `/api/admin/stock?packageId=${encodeURIComponent(packageId)}&date=${encodeURIComponent(date)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      if (!response.ok) {
-        setStockSummary(null);
-        return;
-      }
-      const data = await response.json();
-      setStockSummary(data);
-    } catch {
-      setStockSummary(null);
-    } finally {
-      setStockLoading(false);
-    }
+      const res = await fetch(`/api/admin/stock?packageId=${encodeURIComponent(packageId)}&date=${encodeURIComponent(date)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setStock(res.ok ? await res.json() : null);
+    } catch { setStock(null); } finally { setStockLoading(false); }
   }, [reserva, user]);
 
+  useEffect(() => { fetchStock(); }, [fetchStock]);
+
   useEffect(() => {
-    const fetchHistory = async () => {
+    let off = false;
+    (async () => {
       if (!reserva?.customerEmail || !user) return;
-      setHistoryLoading(true);
       try {
         const token = await user.getIdToken();
-        const response = await fetch(
-          `/api/admin/reservas/history?email=${encodeURIComponent(reserva.customerEmail)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-        if (!response.ok) {
-          setManualHistory([]);
-          return;
-        }
-        const payload = await response.json();
-        setManualHistory(payload.reservations ?? []);
-      } catch {
-        setManualHistory([]);
-      } finally {
-        setHistoryLoading(false);
-      }
-    };
+        const res = await fetch(`/api/admin/reservas/history?email=${encodeURIComponent(reserva.customerEmail)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const payload = await res.json();
+        if (!off) setOtherPurchases((payload.reservations ?? []).filter((r: Reservation) => r.id !== reserva.id).slice(0, 4));
+      } catch { /* noop */ }
+    })();
+    return () => { off = true; };
+  }, [reserva?.customerEmail, reserva?.id, user]);
 
-    fetchHistory();
-  }, [reserva?.customerEmail, user]);
+  const venta = useMemo(() => (reserva ? buildVentaStatuses(reserva) : null), [reserva]);
+  const finance = useMemo(
+    () => (reserva ? computeVentaFinance(reserva as Reservation & Record<string, unknown>, payments) : null),
+    [reserva, payments],
+  );
+
+  const paymentRows = useMemo(
+    () => payments.slice().sort((a, b) => toMs(b.occurredAt ?? b.createdAt) - toMs(a.occurredAt ?? a.createdAt)),
+    [payments],
+  );
+
+  const linksForPackage = useMemo(() => {
+    const pid = String(reserva?.packageId ?? reserva?.experienceId ?? '').trim();
+    if (!pid) return links;
+    return links.filter((l) => {
+      const lp = String(l.packageId ?? l.experienceId ?? '').trim();
+      return !lp || lp === pid;
+    });
+  }, [links, reserva?.experienceId, reserva?.packageId]);
+
+  const filteredAddons = useMemo(() => {
+    const query = addonQuery.trim().toLowerCase();
+    const existingLabels = new Set(
+      ((reserva?.selectedExtras ?? []) as Array<{ label?: string }>).map((x) => String(x?.label ?? '').trim().toLowerCase())
+    );
+    return addonCatalog.filter((entry) => {
+      if (existingLabels.has(entry.addon.title.trim().toLowerCase())) return false;
+      if (!query) return true;
+      return (
+        entry.addon.title.toLowerCase().includes(query) ||
+        entry.packageTitle.toLowerCase().includes(query)
+      );
+    });
+  }, [addonCatalog, addonQuery, reserva?.selectedExtras]);
 
   useEffect(() => {
-    fetchStockInfo();
-  }, [fetchStockInfo]);
+    if (!addonPickedKey) return;
+    const picked = addonCatalog.find((entry) => entry.key === addonPickedKey);
+    if (picked) {
+      setAddonTitle(picked.addon.title);
+      setAddonPrice(String(picked.addon.price));
+    }
+  }, [addonCatalog, addonPickedKey]);
 
-  const referralSummary = useMemo(() => {
-    if (!reserva?.referredBy) return 'Sin referido asignado';
-    const channel =
-      reserva.referredBy.channel === 'link'
-        ? 'Link de vendedor'
-        : 'Asignación manual';
-    const statusLabel = reserva.referredBy.payoutStatus
-      ? ` · Estado comisión: ${reserva.referredBy.payoutStatus}`
-      : '';
-    return `${channel}${statusLabel}`;
-  }, [reserva?.referredBy]);
-
-  const handleReferralUpdate = async (options: { clear?: boolean } = {}) => {
-    if (!reserva || !user) return;
-    const manualCode = manualReferralCode.trim();
-    const suggestedCode = selectedReferralCode.trim();
-    setUpdatingReferral(true);
+  const handleAddAddon = async () => {
+    const token = await authed(); if (!token || !reserva) return;
+    const title = addonTitle.trim().slice(0, 120);
+    const price = Number(String(addonPrice).replace(/\./g, '').replace(',', '.').trim());
+    if (!title) { toast.error('Elegí un adicional o escribí el título'); return; }
+    if (!Number.isFinite(price) || price <= 0) { toast.error('Ingresá un precio válido'); return; }
+    setSavingAddon(true);
     try {
-      const token = await user.getIdToken();
-      const body: any = {
-        reservationId: reserva.id,
-      };
-      if (options.clear) {
-        body.clearReferredBy = true;
-      } else {
-        if (vendorId) body.vendorId = vendorId;
-        if (manualCode) {
-          body.referralCode = manualCode;
-        } else if (suggestedCode) {
-          body.referralCode = suggestedCode;
-        }
-      }
-      const response = await fetch('/api/admin/reservas', {
+      const res = await fetch('/api/admin/reservas', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        const error = await response.json().catch(() => null);
-        throw new Error(error?.error ?? 'No se pudo actualizar el referido');
-      }
-      toast.success(options.clear ? 'Referido eliminado' : 'Referido actualizado');
-      await loadReserva({ showLoading: false });
-    } catch (error) {
-      console.error('Error actualizando referido:', error);
-      toast.error('No pudimos actualizar el referido');
-    } finally {
-      setUpdatingReferral(false);
-    }
-  };
-
-  const handleAddPaymentEvent = async () => {
-    if (!reserva || !user) return;
-    const amount = moneyInputToCents(paymentForm.amount);
-    if (!amount) {
-      toast.error('Ingresá un monto válido');
-      return;
-    }
-    if (!paymentForm.message.trim()) {
-      toast.error('Ingresá un detalle del movimiento');
-      return;
-    }
-
-    setSavingPaymentEvent(true);
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/admin/reservas', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           reservationId: reserva.id,
-          addPaymentEvent: {
-            movementType: paymentForm.movementType,
-            amount,
-            currency: reserva.currency,
-            method: paymentForm.method,
-            reference: paymentForm.reference.trim() || undefined,
-            message: paymentForm.message.trim(),
-          },
+          addAddonExtra: { title, price, scope: 'per_booking' },
         }),
       });
-      if (!response.ok) {
-        const error = await response.json().catch(() => null);
-        throw new Error(error?.error ?? 'No se pudo registrar el movimiento');
-      }
-      toast.success('Movimiento registrado');
-      setPaymentForm({
-        movementType: 'payment',
-        amount: '',
-        method: 'transfer',
-        reference: '',
-        message: '',
-      });
-      await loadReserva({ showLoading: false });
-    } catch (error) {
-      console.error('Error registrando movimiento financiero:', error);
-      toast.error('No pudimos registrar el movimiento');
-    } finally {
-      setSavingPaymentEvent(false);
-    }
-  };
-
-  const handleStatusUpdate = async (targetStatus: ReservationStatus, note?: string) => {
-    if (!reserva || !user) return;
-    setStatusUpdating(true);
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/admin/reservas', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          reservationId: reserva.id,
-          status: targetStatus,
-          note: note ?? statusNote,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error('No se pudo actualizar el estado');
-      }
-      toast.success('Estado actualizado');
-      await loadReserva({ showLoading: false });
-      await fetchStockInfo();
-    } catch (error) {
-      console.error('Error actualizando estado:', error);
-      toast.error('No pudimos actualizar el estado');
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
-
-  const handleCancelReservation = () => handleStatusUpdate('cancelled', 'Cancelada desde el panel administrador');
-
-  const enqueueEmail = async (type: 'customer' | 'admin') => {
-    if (!reserva || !user) return;
-    try {
-      setStatusUpdating(true);
-      const token = await user.getIdToken();
-      const response = await fetch('/api/admin/reservas', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          reservationId: reserva.id,
-          ...(type === 'customer'
-            ? { enqueueCustomerVoucherEmail: true }
-            : { enqueueAdminNotificationEmail: true }),
-        }),
-      });
-      if (!response.ok) throw new Error('No se pudo encolar el email');
-      toast.success(type === 'customer' ? 'Voucher reencolado' : 'Aviso interno reencolado');
-      await loadReserva({ showLoading: false });
-    } catch (error) {
-      console.error('Error reenviando email:', error);
-      toast.error('No pudimos encolar el email');
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    const input = event.currentTarget;
-    if (!files?.length || !reserva || !user) return;
-    setUploadingAttachments(true);
-    const uploadedAttachments: ReservationAttachment[] = [];
-    for (const file of Array.from(files)) {
-      const formData = new FormData();
-      formData.append('file', file);
-      try {
-        const uploadResponse = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        if (!uploadResponse.ok) {
-          throw new Error('No se pudo subir el archivo');
-        }
-        const data = await uploadResponse.json();
-        uploadedAttachments.push({
-          id: crypto.randomUUID(),
-          url: data.url,
-          name: file.name,
-          type: file.type,
-          uploadedBy: 'admin',
-          createdAt: new Date(),
-        });
-      } catch (error) {
-        console.error('[Detalle Reserva] Error subiendo archivo:', error);
-        toast.error('No pudimos subir el archivo');
-      }
-    }
-
-    if (uploadedAttachments.length === 0) {
-      setUploadingAttachments(false);
-      return;
-    }
-
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/admin/reservas', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          reservationId: reserva.id,
-          attachments: uploadedAttachments.map((attachment) => ({
-            url: attachment.url,
-            name: attachment.name,
-            type: attachment.type,
-            uploadedBy: 'admin',
-          })),
-        }),
-      });
-      if (!response.ok) {
-        throw new Error('No se pudo guardar el comprobante');
-      }
-      toast.success('Comprobantes actualizados');
-      await loadReserva({ showLoading: false });
-    } catch (error) {
-      console.error('[Detalle Reserva] Error guardando adjuntos:', error);
-      toast.error('No pudimos guardar los adjuntos');
-    } finally {
-      setUploadingAttachments(false);
-      if (input) {
-        input.value = '';
-      }
-    }
-  };
-
-  const handleAttachmentDelete = async (attachmentId: string) => {
-    if (!reserva || !user) return;
-    setRemovingAttachmentIds((prev) => [...prev, attachmentId]);
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/admin/reservas', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          reservationId: reserva.id,
-          removeAttachments: [{ id: attachmentId }],
-        }),
-      });
-      if (!response.ok) {
-        throw new Error('No pudimos borrar el archivo');
-      }
-      toast.success('Comprobante eliminado');
-      await loadReserva({ showLoading: false });
-      await fetchStockInfo();
-    } catch (error) {
-      console.error('[Detalle Reserva] Error eliminando adjunto:', error);
-      toast.error('No pudimos eliminar el comprobante');
-    } finally {
-      setRemovingAttachmentIds((prev) => prev.filter((id) => id !== attachmentId));
-    }
+      if (!res.ok) { const err = await res.json().catch(() => null); throw new Error(err?.error ?? ''); }
+      toast.success(`Adicional sumado: ${title}`);
+      setAddonTitle('');
+      setAddonPrice('');
+      setAddonPickedKey('');
+      setShowAddonForm(false);
+      await load(false);
+    } catch { toast.error('No pudimos sumar el adicional'); } finally { setSavingAddon(false); }
   };
 
   if (loading) {
     return (
       <ProtectedRoute>
         <AdminLayout>
-          <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 pb-10 pt-6 sm:px-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="space-y-2">
-                <div className="h-3 w-20 bg-gray-200 rounded-md animate-pulse" />
-                <div className="h-7 w-56 bg-gray-200 rounded-md animate-pulse" />
-                <div className="h-4 w-40 bg-gray-200 rounded-md animate-pulse" />
-              </div>
-              <div className="h-6 w-20 bg-gray-200 rounded-md animate-pulse" />
+          <div className="mx-auto flex max-w-5xl flex-col gap-4">
+            <div className="h-4 w-24 animate-pulse rounded bg-slate-200" />
+            <div className="h-8 w-2/3 animate-pulse rounded-lg bg-slate-200" />
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="h-56 animate-pulse rounded-2xl bg-white ring-1 ring-black/5 lg:col-span-2" />
+              <div className="h-56 animate-pulse rounded-2xl bg-white ring-1 ring-black/5" />
             </div>
-
-            <section className="grid gap-4 rounded-3xl bg-white/90 px-5 py-4 shadow-lg ring-1 ring-black/5 sm:grid-cols-2">
-              <div className="space-y-2">
-                <div className="h-3 w-24 bg-gray-200 rounded-md animate-pulse" />
-                <div className="h-6 w-40 bg-gray-200 rounded-md animate-pulse" />
-                <div className="flex gap-2">
-                  <div className="h-5 w-16 bg-gray-200 rounded-md animate-pulse" />
-                  <div className="h-3 w-28 bg-gray-200 rounded-md animate-pulse" />
-                </div>
-                <div className="h-3 w-24 bg-gray-200 rounded-md animate-pulse" />
-              </div>
-              <div className="space-y-2 border-l border-dashed border-black/5 pl-4 sm:border-l sm:pl-6">
-                <div className="h-3 w-20 bg-gray-200 rounded-md animate-pulse" />
-                <div className="space-y-2">
-                  <div className="h-4 w-28 bg-gray-200 rounded-md animate-pulse" />
-                  <div className="h-4 w-24 bg-gray-200 rounded-md animate-pulse" />
-                  <div className="h-3 w-32 bg-gray-200 rounded-md animate-pulse" />
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-3xl bg-white/90 p-5 shadow-lg ring-1 ring-black/5">
-              <div className="flex items-center justify-between">
-                <div className="space-y-2">
-                  <div className="h-3 w-16 bg-gray-200 rounded-md animate-pulse" />
-                  <div className="h-6 w-48 bg-gray-200 rounded-md animate-pulse" />
-                  <div className="h-3 w-40 bg-gray-200 rounded-md animate-pulse" />
-                </div>
-                <div className="h-6 w-16 bg-gray-200 rounded-md animate-pulse" />
-              </div>
-              <div className="mt-4 grid gap-2 rounded-2xl bg-gray-50/70 p-4 sm:grid-cols-2">
-                <div className="h-4 w-24 bg-gray-200 rounded-md animate-pulse" />
-                <div className="h-4 w-20 bg-gray-200 rounded-md animate-pulse" />
-              </div>
-            </section>
+            <div className="h-48 animate-pulse rounded-2xl bg-white ring-1 ring-black/5" />
           </div>
         </AdminLayout>
       </ProtectedRoute>
     );
   }
+  if (!reserva || !finance) return null;
 
-  if (!reserva) return null;
+  const r = reserva as Reservation & Record<string, unknown>;
+  const title = reserva.packageTitle || reserva.experienceTitle || 'Venta';
+  const code = String(r.reservationCode ?? '').trim();
+  const seats: string[] = Array.isArray(r.selectedSeats) ? r.selectedSeats.map(String) : [];
+  const extras = (Array.isArray(r.selectedExtras) ? r.selectedExtras : []).filter((x: { label?: string }) => String(x?.label ?? '').trim());
+  const travelers: Array<Record<string, unknown>> = Array.isArray(r.passengerDetails) ? (r.passengerDetails as unknown as Array<Record<string, unknown>>) : [];
+  const pickup = String(r.pickupPoint ?? '').trim();
+  const pickupTime = String(r.pickupPointTime ?? '').trim();
+  const roomType = String(r.roomType ?? '').trim();
+  const mpId = String(reserva.mercadoPagoPaymentId ?? '').trim();
+  const progress = finance.billedTotal > 0 ? Math.min(100, Math.round((finance.totalPaid / finance.billedTotal) * 100)) : 0;
+  const country = reserva.customerCountry ? getCountryByName(reserva.customerCountry) : null;
 
-  const statusLabel = reserva.status;
-  const reservationLabel = reserva.packageTitle || reserva.experienceTitle || 'Reserva confirmada';
-  const reservationCode = String((reserva as any).reservationCode ?? '').trim();
-  const pickupPointLabel = String((reserva as any).pickupPoint ?? '').trim();
-  const pickupPointTimeLabel = String((reserva as any).pickupPointTime ?? '').trim();
-  const selectedExtras = Array.isArray((reserva as any).selectedExtras)
-    ? (reserva as any).selectedExtras.filter((item: any) => String(item?.label ?? '').trim().length > 0)
-    : [];
-  const passengerDetails = Array.isArray((reserva as any).passengerDetails)
-    ? (reserva as any).passengerDetails
-    : [];
-  const paymentRows = payments
-    .slice()
-    .sort((a, b) => toTimestampMs(b.occurredAt ?? b.createdAt) - toTimestampMs(a.occurredAt ?? a.createdAt));
+  const authed = async () => {
+    if (!user) { toast.error('Sesión expirada'); return null; }
+    return user.getIdToken();
+  };
+
+  const handleStatus = async (next: ReservationStatus, note?: string) => {
+    const token = await authed(); if (!token) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/admin/reservas', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reservationId: reserva.id, status: next, note: note ?? statusNote }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Estado actualizado');
+      await load(false);
+      await fetchStock();
+    } catch { toast.error('No pudimos actualizar el estado'); } finally { setBusy(false); }
+  };
+
+  const handleReferral = async (clear = false) => {
+    const token = await authed(); if (!token) return;
+    setSavingReferral(true);
+    try {
+      const body: Record<string, unknown> = { reservationId: reserva.id };
+      if (clear) body.clearReferredBy = true;
+      else {
+        if (vendorId) body.vendorId = vendorId;
+        if (manualCode.trim()) body.referralCode = manualCode.trim();
+        else if (pickedCode.trim()) body.referralCode = pickedCode.trim();
+      }
+      const res = await fetch('/api/admin/reservas', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+      if (!res.ok) { const e = await res.json().catch(() => null); throw new Error(e?.error ?? ''); }
+      toast.success(clear ? 'Vendedor desvinculado' : 'Vendedor actualizado');
+      await load(false);
+    } catch { toast.error('No pudimos actualizar el vendedor'); } finally { setSavingReferral(false); }
+  };
+
+  const handleMovement = async () => {
+    const token = await authed(); if (!token) return;
+    const amount = moneyToCents(form.amount);
+    if (!amount) { toast.error('Ingresá un monto válido'); return; }
+    if (!form.message.trim()) { toast.error('Agregá un detalle'); return; }
+    setSavingMovement(true);
+    try {
+      const res = await fetch('/api/admin/reservas', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          reservationId: reserva.id,
+          addPaymentEvent: { movementType: form.movementType, amount, currency: reserva.currency, method: form.method, reference: form.reference.trim() || undefined, message: form.message.trim() },
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Movimiento registrado');
+      setForm({ movementType: 'payment', amount: '', method: 'transfer', reference: '', message: '' });
+      setShowMovementForm(false);
+      await load(false);
+    } catch { toast.error('No pudimos registrar el movimiento'); } finally { setSavingMovement(false); }
+  };
+
+  const enqueue = async (type: 'customer' | 'admin') => {
+    const token = await authed(); if (!token) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/admin/reservas', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reservationId: reserva.id, ...(type === 'customer' ? { enqueueCustomerVoucherEmail: true } : { enqueueAdminNotificationEmail: true }) }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Email reencolado');
+      await load(false);
+    } catch { toast.error('No pudimos encolar el email'); } finally { setBusy(false); }
+  };
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const token = await authed(); if (!token) return;
+    setUploading(true);
+    try {
+      const uploaded = [];
+      for (const file of Array.from(files)) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const up = await fetch('/api/upload', { method: 'POST', body: fd });
+        if (!up.ok) throw new Error();
+        const data = await up.json();
+        uploaded.push({ url: data.url, name: file.name, type: file.type, uploadedBy: 'admin' });
+      }
+      const res = await fetch('/api/admin/reservas', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reservationId: reserva.id, attachments: uploaded }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Comprobante agregado');
+      await load(false);
+    } catch { toast.error('No pudimos subir el comprobante'); } finally { setUploading(false); }
+  };
+
+  const deleteAttachment = async (id: string) => {
+    const token = await authed(); if (!token) return;
+    setRemovingIds((p) => [...p, id]);
+    try {
+      const res = await fetch('/api/admin/reservas', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reservationId: reserva.id, removeAttachments: [{ id }] }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Comprobante eliminado');
+      await load(false);
+    } catch { toast.error('No pudimos eliminar el comprobante'); } finally { setRemovingIds((p) => p.filter((x) => x !== id)); }
+  };
 
   return (
     <ProtectedRoute>
       <AdminLayout>
-        <div className="mx-auto flex max-w-4xl flex-col gap-5 px-4 pb-10 pt-6 sm:px-6">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Venta</p>
-              <h1 className="text-xl font-semibold text-gray-900 sm:text-[22px]">{reservationLabel}</h1>
-              <p className="text-xs text-gray-600 sm:text-sm">
-                {reservationCode ? `Código de reserva ${reservationCode}` : 'Código pendiente de asignación'}
-              </p>
-              <p className="text-xs text-gray-500 sm:text-sm">
-                {reserva.date === 'sin-fecha'
-                  ? 'Fecha a coordinar'
-                  : `${formatDate(reserva.date)} · ${reserva.people} persona${reserva.people !== 1 ? 's' : ''}`}
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 pb-10">
+          {/* Header */}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <Button variant="ghost" size="sm" asChild className="-ml-2 text-slate-500">
+                <Link href="/admin/ventas"><ArrowLeft className="h-4 w-4" />Ventas</Link>
+              </Button>
+              <h1 className="mt-1 truncate text-xl font-semibold tracking-tight text-slate-900">{title}</h1>
+              <p className="mt-0.5 text-sm text-slate-500">
+                {code ? <span className="font-mono font-medium text-slate-700">{code}</span> : 'Código pendiente'}
+                <span className="mx-2 text-slate-300">·</span>
+                {reserva.date === 'sin-fecha' ? 'Fecha a coordinar' : formatDate(reserva.date)}
+                <span className="mx-2 text-slate-300">·</span>
+                {reserva.people} {reserva.people === 1 ? 'persona' : 'personas'}
               </p>
             </div>
-            <Badge variant={statusBadgeVariant[statusLabel]} className="capitalize">
-              {ventaStatuses?.commercialStatusLabel ?? ventaStatusLabel(statusLabel)}
-            </Badge>
+            <div className="flex flex-col items-start gap-2 sm:items-end">
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant={commercialBadge[reserva.status]}>{venta?.commercialStatusLabel ?? ventaStatusLabel(reserva.status)}</Badge>
+                <Badge variant={financeBadge(finance)}>{financeStatusLabel(finance)}</Badge>
+              </div>
+              <p className="text-2xl font-bold tabular-nums tracking-tight text-slate-900">{formatAmount(finance.billedTotal, finance.currency)}</p>
+            </div>
           </div>
 
-          <section className="grid gap-4 rounded-3xl bg-white/90 px-4 py-4 shadow-lg ring-1 ring-black/5 sm:grid-cols-2 sm:px-5">
-            <div className="space-y-4">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Resumen operativo</p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="text-xs text-gray-500">Fecha</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {reserva.date === 'sin-fecha' ? 'A coordinar' : formatDate(reserva.date)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Pasajeros</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {reserva.people} persona{reserva.people !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Cliente</p>
-                    <p className="text-sm font-medium text-gray-900">{reserva.customerName || 'Sin nombre'}</p>
-                    <p className="text-xs text-gray-500">{reserva.customerEmail || 'Sin email'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Cobranza</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {paymentSummary.balance > 0
-                        ? `Saldo pendiente ${formatAmount(paymentSummary.balance, reserva.currency)}`
-                        : paymentSummary.balance < 0
-                          ? `Saldo a favor ${formatAmount(Math.abs(paymentSummary.balance), reserva.currency)}`
-                          : 'Al día'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Ascenso</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {pickupPointLabel || 'Sin definir'}
-                      {pickupPointTimeLabel ? ` · ${pickupPointTimeLabel}` : ''}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Habitación</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {roomTypeLabel((reserva as any).roomType ?? null)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              {Array.isArray((reserva as any).selectedSeats) && (reserva as any).selectedSeats.length > 0 ? (
-                <div className="rounded-2xl bg-gray-50/80 px-4 py-3 text-sm text-gray-700">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Butacas</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900">{(reserva as any).selectedSeats.join(', ')}</p>
-                </div>
-              ) : null}
-              {selectedExtras.length > 0 ? (
-                <div className="rounded-2xl bg-gray-50/80 px-4 py-3 text-sm text-gray-700">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Extras</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900">
-                    {selectedExtras.map((item: any) => String(item.label)).join(', ')}
-                  </p>
-                </div>
-              ) : null}
-              <div className="rounded-2xl bg-gray-50/80 px-4 py-3 text-sm text-gray-700">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Pasajeros</p>
-                <div className="mt-1 space-y-0.5">
-                  <p className="text-sm font-medium text-gray-900">
-                    Pasajero 1: {reserva.customerName || 'Sin nombre'}
-                  </p>
-                  {passengerDetails.map((traveler: any, index: number) => {
-                    const fullName = `${String(traveler?.firstName ?? '').trim()} ${String(traveler?.lastName ?? '').trim()}`.trim();
-                    return (
-                      <p key={index} className="text-sm font-medium text-gray-900">
-                        Pasajero {index + 2}: {fullName || 'Sin nombre'}
-                      </p>
-                    );
-                  })}
-                </div>
-              </div>
-              {Array.isArray((reserva as any).selectedSeats) &&
-              (reserva as any).selectedSeats.length > 0 &&
-              reserva.date !== 'sin-fecha' ? (
-                <div className="pt-1">
-                  <Button asChild size="sm" variant="outline">
-                    <Link href={`/admin/butacas?packageId=${encodeURIComponent(String(reserva.packageId ?? reserva.experienceId))}&date=${encodeURIComponent(String(reserva.date))}`}>
-                      Ver en mapa de butacas
-                    </Link>
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-            <div className="space-y-4 border-l border-dashed border-black/5 pl-4 sm:border-l sm:pl-6">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Estado de la venta</p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                    <p className="text-xs text-gray-500">Comercial</p>
-                    <p className="text-sm font-medium text-gray-900">{ventaStatuses?.commercialStatusLabel ?? '—'}</p>
-                  </div>
-                  <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                    <p className="text-xs text-gray-500">Operativo</p>
-                    <p className="text-sm font-medium text-gray-900">{ventaStatuses?.operationalStatusLabel ?? '—'}</p>
-                  </div>
-                  <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                    <p className="text-xs text-gray-500">Medio de cobro</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {ventaStatuses?.paymentMethodLabel ?? paymentMethodLabel(reserva.paymentMethod)}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                    <p className="text-xs text-gray-500">Estado del pago</p>
-                    <p className="text-sm font-medium text-gray-900">{ventaStatuses?.paymentStatusLabel ?? '—'}</p>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Disponibilidad</p>
-              </div>
-              {stockLoading ? (
-                <p className="text-sm text-gray-500">Cargando disponibilidad…</p>
-              ) : stockSummary ? (
-                <div className="rounded-2xl bg-gray-50/80 px-4 py-3 text-sm text-gray-700">
-                  <p className="font-medium text-gray-900">
-                    {stockSummary.available} lugar{stockSummary.available !== 1 ? 'es' : ''} disponible
-                    {stockSummary.available !== 1 ? 's' : ''}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Salida base de {stockSummary.baseCapacity} lugar{stockSummary.baseCapacity !== 1 ? 'es' : ''}.
-                  </p>
-                  <p className="mt-1 text-xs text-gray-400">
-                    {stockSummary.movements.length > 0
-                      ? `${stockSummary.movements.length} movimiento${stockSummary.movements.length !== 1 ? 's' : ''} registrado${stockSummary.movements.length !== 1 ? 's' : ''} recientemente.`
-                      : 'Sin movimientos recientes.'}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">No hay disponibilidad asociada a esta salida.</p>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Comunicación</p>
-                <h2 className="text-base font-semibold text-gray-900">Voucher y emails</h2>
-                <p className="text-xs text-gray-500 sm:text-sm">Seguimiento del envío automático y reintentos manuales de esta venta.</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" disabled={statusUpdating} onClick={() => enqueueEmail('customer')}>
-                  <MailCheck className="mr-2 h-4 w-4" />
-                  Reenviar voucher
-                </Button>
-                <Button size="sm" variant="outline" disabled={statusUpdating} onClick={() => enqueueEmail('admin')}>
-                  <Mail className="mr-2 h-4 w-4" />
-                  Avisar al admin
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <div className="rounded-2xl border border-black/5 bg-gray-50/80 p-4">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-400">
-                  <MailCheck className="h-3.5 w-3.5" />
-                  Email confirmación
-                </div>
-                <div className="mt-2 text-sm font-semibold text-gray-900 sm:text-base">
-                  {emailStatusLabel(ventaStatuses?.customerConfirmationEmailStatus ?? deriveCustomerConfirmationEmailStatus(reserva))}
-                </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  {reserva.emailDelivery?.customerConfirmation?.error || 'Confirmación inmediata de compra.'}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-black/5 bg-gray-50/80 p-4">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-400">
-                  <Receipt className="h-3.5 w-3.5" />
-                  Voucher 48 hs
-                </div>
-                <div className="mt-2 text-sm font-semibold text-gray-900 sm:text-base">{voucherStatusLabel(ventaStatuses?.voucherStatus ?? deriveVoucherStatus(reserva))}</div>
-                <div className="mt-1 text-xs text-gray-500">
-                  {reserva.voucherSentAt
-                    ? `Enviado: ${formatDateTime(reserva.voucherSentAt)}`
-                    : reserva.voucherScheduledAt
-                      ? `Programado: ${formatDateTime(reserva.voucherScheduledAt)}`
-                      : 'Sin programación confirmada.'}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-black/5 bg-gray-50/80 p-4">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-400">
-                  <Mail className="h-3.5 w-3.5" />
-                  Email interno
-                </div>
-                <div className="mt-2 text-sm font-semibold text-gray-900 sm:text-base">{emailStatusLabel(ventaStatuses?.adminEmailStatus ?? deriveAdminEmailStatus(reserva))}</div>
-                <div className="mt-1 text-xs text-gray-500">
-                  {reserva.emailDelivery?.adminNotification?.error || 'Notificación operativa para el panel interno.'}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Canal comercial</p>
-                <h2 className="text-base font-semibold text-gray-900">
-                  {reserva.referredBy?.vendorName ?? 'Sin vendedor asignado'}
-                </h2>
-                <p className="text-xs text-gray-500">
-                  {reserva.referredBy?.code
-                    ? `Código activo: ${reserva.referredBy.code}`
-                    : reserva.referredBy
-                      ? 'Asignación manual'
-                      : 'Podés vincular esta venta a un vendedor o código'}
-                </p>
-                <p className="text-xs text-gray-400">{referralSummary}</p>
-              </div>
-              <div className="flex items-start gap-2">
-                {reserva.referredBy && (
-                  <Badge variant="outline" className="capitalize">
-                    {reserva.referredBy.payoutStatus}
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 rounded-2xl bg-gray-50/70 p-4 text-sm text-gray-700 md:grid-cols-3">
-              <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-600">Vendedor</Label>
-                <Select
-                  value={vendorId || 'none'}
-                  onValueChange={(value) => {
-                    const nextVendorId = value === 'none' ? '' : value;
-                    setVendorId(nextVendorId);
-                    setSelectedReferralCode('');
-                    setManualReferralCode('');
-                  }}
-                  disabled={updatingReferral}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Sin vendedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin vendedor</SelectItem>
-                    {vendors.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>
-                        {v.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-600">Código sugerido</Label>
-                <Select
-                  value={selectedReferralCode || 'none'}
-                  onValueChange={(value) => {
-                    setSelectedReferralCode(value === 'none' ? '' : value);
-                    setManualReferralCode('');
-                  }}
-                  disabled={!vendorId || referralLinksForReservation.length === 0 || referralLinksLoading || updatingReferral}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Elegí un código" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin código</SelectItem>
-                    {referralLinksForReservation.map((link) => (
-                      <SelectItem key={link.id} value={link.code}>
-                        {link.code} {link.experienceName ? `· ${link.experienceName}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {referralLinksLoading ? (
-                  <p className="text-[11px] text-gray-500">Cargando códigos disponibles…</p>
-                ) : !vendorId ? (
-                  <p className="text-[11px] text-gray-500">Primero elegí un vendedor.</p>
-                ) : referralLinksForReservation.length === 0 ? (
-                  <p className="text-[11px] text-gray-500">Ese vendedor no tiene códigos activos para este paquete.</p>
-                ) : null}
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-medium text-gray-600">Código manual</Label>
-                <Input
-                  value={manualReferralCode}
-                  onChange={(event) => {
-                    setManualReferralCode(event.target.value);
-                    if (event.target.value.trim()) setSelectedReferralCode('');
-                  }}
-                  placeholder="Ingresá un código exacto"
-                  disabled={updatingReferral}
-                />
-                <p className="text-[11px] text-gray-500">
-                  Si cargás un código manual, se valida para este paquete y reemplaza al sugerido.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="success"
-                  disabled={updatingReferral || (!vendorId && !selectedReferralCode && !manualReferralCode.trim())}
-                  onClick={() => handleReferralUpdate()}
-                >
-                  {updatingReferral ? (
-                    <>
-                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                      Guardando
-                    </>
-                  ) : (
-                    'Guardar cambios'
-                  )}
-                </Button>
-                {reserva.referredBy && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={updatingReferral}
-                    onClick={() => handleReferralUpdate({ clear: true })}
-                  >
-                    Cancelar vínculo
-                  </Button>
-                )}
-              </div>
-              <p className="text-xs text-gray-500">
-                La comisión se recalcula automáticamente según el vendedor y el estado actual de la venta.
-              </p>
-            </div>
-
-            {reserva.referredBy && (
-              <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-gray-200 bg-white/70 p-4 text-sm text-gray-700 sm:grid-cols-2">
-                <p>
-                  Comisión:{' '}
-                  <span className="font-medium">
-                    {(reserva.referredBy.commissionAmount / 100).toLocaleString(undefined, {
-                      maximumFractionDigits: 0,
-                    })}{' '}
-                    {reserva.referredBy.commissionCurrency.toUpperCase()}
-                  </span>
-                </p>
-                <p>
-                  Regla:{' '}
-                  <span className="font-medium">
-                    {reserva.referredBy.commissionType === 'percent'
-                      ? `${reserva.referredBy.commissionValue}%`
-                      : `${reserva.referredBy.commissionValue} ${reserva.referredBy.commissionCurrency.toUpperCase()}`}
-                  </span>
-                </p>
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Cobranza</p>
-                <h2 className="text-base font-semibold text-gray-900">Resumen financiero</h2>
-                <p className="text-xs text-gray-500 sm:text-sm">Movimientos de cobro, ajustes y saldo de la reserva.</p>
-              </div>
-              <Badge
-                variant={paymentSummary.balance > 0 ? 'outline' : 'default'}
-                className="capitalize"
-              >
-                {paymentSummary.balance > 0
-                  ? 'Saldo pendiente'
-                  : paymentSummary.balance < 0
-                    ? 'Saldo a favor'
-                    : 'Saldo conciliado'}
-              </Badge>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                <p className="text-xs text-gray-500">Venta base</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">
-                  {formatAmount(paymentSummary.baseTotal, reserva.currency)}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                <p className="text-xs text-gray-500">Ajustes</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">
-                  {paymentSummary.totalAdjustments === 0
-                    ? 'Sin cambios'
-                    : `${paymentSummary.totalAdjustments > 0 ? '+' : '-'}${formatAmount(Math.abs(paymentSummary.totalAdjustments), reserva.currency)}`}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                <p className="text-xs text-gray-500">Total a cobrar</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">
-                  {formatAmount(paymentSummary.billedTotal, reserva.currency)}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-gray-50/80 px-4 py-3">
-                <p className="text-xs text-gray-500">Cobrado</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">
-                  {formatAmount(paymentSummary.totalPaid, paymentsCurrency)}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-2xl border border-black/5 bg-white px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Saldo actual</p>
-              <p className="mt-1 text-base font-semibold text-gray-900">
-                {paymentSummary.balance > 0
-                  ? `${formatAmount(paymentSummary.balance, reserva.currency)} pendiente`
-                  : paymentSummary.balance < 0
-                    ? `${formatAmount(Math.abs(paymentSummary.balance), reserva.currency)} a favor`
-                    : 'Sin saldo pendiente'}
-              </p>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-[1.5fr_1fr]">
-              <div className="rounded-2xl border border-black/5 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Historial financiero</p>
-                    <p className="text-sm font-semibold text-gray-900">Movimientos registrados</p>
-                  </div>
+          <div className="grid items-start gap-4 lg:grid-cols-3">
+            <div className="flex flex-col gap-4 lg:col-span-2">
+              {/* Pago — única fuente de verdad */}
+              <Card>
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    {paymentsLoading ? <Loader2 className="h-4 w-4 animate-spin text-gray-500" /> : null}
-                    <Badge variant="outline" className="text-[11px] text-gray-600">
-                      {paymentRows.length}
-                    </Badge>
+                    <CreditCard className="h-4 w-4 text-slate-400" />
+                    <h2 className="text-sm font-semibold text-slate-900">Pago</h2>
+                    {finance.paidViaReservaFallback && (
+                      <span className="text-[11px] text-slate-400">· acreditado según reserva (sin movimientos legibles)</span>
+                    )}
                   </div>
+                  <span className="text-xs text-slate-500">{methodLabel(venta?.paymentMethodLabel ?? reserva.paymentMethod)} · {venta?.paymentStatusLabel ?? ''}</span>
                 </div>
 
-                {paymentsLoading ? (
-                  <div className="mt-3 space-y-2">
-                    <div className="h-10 w-full animate-pulse rounded-xl bg-gray-100" />
-                    <div className="h-10 w-full animate-pulse rounded-xl bg-gray-100" />
-                  </div>
-                ) : paymentRows.length === 0 ? (
-                  <div className="mt-3 rounded-xl bg-gray-50 px-3 py-3 text-sm text-gray-600">
-                    No hay movimientos registrados para esta venta.
-                  </div>
-                ) : (
-                  <div className="mt-3 overflow-hidden rounded-2xl border border-black/5">
-                    <div className="grid grid-cols-[1.2fr_1.4fr_0.9fr_0.9fr] gap-3 bg-gray-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
-                      <span>Fecha</span>
-                      <span>Concepto</span>
-                      <span>Medio</span>
-                      <span className="text-right">Monto</span>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full rounded-full ${finance.status === 'settled' ? 'bg-emerald-500' : finance.status === 'partial' ? 'bg-amber-400' : 'bg-slate-300'}`} style={{ width: `${progress}%` }} />
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    { k: 'Total', v: formatAmount(finance.billedTotal, finance.currency) },
+                    { k: 'Cobrado', v: formatAmount(finance.totalPaid, finance.currency), accent: 'text-emerald-700' },
+                    { k: finance.balance > 0 ? 'Resta cobrar' : finance.balance < 0 ? 'A favor' : 'Saldo', v: finance.balance === 0 ? '—' : formatAmount(Math.abs(finance.balance), finance.currency), accent: finance.balance > 0 ? 'text-amber-700' : undefined },
+                    { k: 'Ajustes', v: finance.adjustments === 0 ? '—' : `${finance.adjustments > 0 ? '+' : '−'}${formatAmount(Math.abs(finance.adjustments), finance.currency)}` },
+                  ].map((m) => (
+                    <div key={m.k} className="rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/[0.04]">
+                      <Eyebrow>{m.k}</Eyebrow>
+                      <p className={`mt-1 text-sm font-semibold tabular-nums text-slate-900 ${m.accent ?? ''}`}>{m.v}</p>
                     </div>
-                    <div className="divide-y divide-black/5 bg-white">
-                      {paymentRows.map((payment) => {
-                        const movementType = normalizePaymentMovementType(payment);
-                        const sign = movementType === 'discount' || movementType === 'refund' ? '-' : '+';
-                        const amountClass =
-                          movementType === 'discount' || movementType === 'refund'
-                            ? 'text-rose-600'
-                            : movementType === 'extra' || movementType === 'adjustment'
-                              ? 'text-amber-600'
-                              : 'text-emerald-600';
+                  ))}
+                </div>
+
+                {finance.pendingAmount > 0 && (
+                  <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200/60">
+                    Hay {formatAmount(finance.pendingAmount, finance.currency)} en proceso (p. ej. Mercado Pago pendiente). No suma como cobrado hasta acreditarse.
+                  </p>
+                )}
+                {mpId && (
+                  <p className="mt-2 font-mono text-[11px] text-slate-400">
+                    MP {mpId}{finance.gatewayStatus ? ` · ${finance.gatewayStatus}` : ''}{reserva.mercadoPagoStatusDetail ? ` · ${String(reserva.mercadoPagoStatusDetail)}` : ''}
+                  </p>
+                )}
+
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <div className="flex items-center justify-between">
+                    <Eyebrow>Movimientos · {paymentRows.length}</Eyebrow>
+                    <Button variant="outline" size="sm" onClick={() => setShowMovementForm((v) => !v)}>
+                      <Plus className="h-4 w-4" />{showMovementForm ? 'Cerrar' : 'Agregar'}
+                    </Button>
+                  </div>
+                  {paymentsLoading ? (
+                    <div className="mt-3 space-y-2">
+                      <div className="h-12 animate-pulse rounded-xl bg-slate-100" />
+                      <div className="h-12 animate-pulse rounded-xl bg-slate-100" />
+                    </div>
+                  ) : paymentRows.length === 0 ? (
+                    <p className="mt-3 rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                      {finance.paidViaReservaFallback
+                        ? 'El pago está acreditado en la reserva.'
+                        : 'Sin movimientos. Si el pago fue por Mercado Pago y no figura, revisá el webhook.'}
+                    </p>
+                  ) : (
+                    <ul className="mt-3 divide-y divide-slate-100 rounded-xl ring-1 ring-black/[0.04]">
+                      {paymentRows.map((p) => {
+                        const t = movementOf(p);
+                        const neg = t === 'discount' || t === 'refund';
                         return (
-                          <div
-                            key={payment.id}
-                            className="grid grid-cols-[1.2fr_1.4fr_0.9fr_0.9fr] gap-3 px-4 py-3 text-sm text-gray-700"
-                          >
+                          <li key={p.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                             <div className="min-w-0">
-                              <p className="mt-1 text-sm font-semibold text-gray-900">{paymentDateLabel(payment)}</p>
-                              <p className="text-xs text-gray-500">
-                                {payment.source === 'manual' ? 'Carga manual' : 'Registro automático'}
+                              <p className="truncate text-sm font-medium text-slate-900">
+                                {movementLabels[t]} <span className="font-normal text-slate-400">· {methodLabel(p.method)}</span>
+                              </p>
+                              <p className="truncate text-xs text-slate-500">
+                                {formatDateTime(p.occurredAt ?? p.createdAt)}{p.message ? ` · ${p.message}` : ''}{p.reference ? ` · ${p.reference}` : ''}
                               </p>
                             </div>
-                            <div className="min-w-0">
-                              <p className="mt-1 text-sm font-semibold text-gray-900">{paymentMovementLabels[movementType]}</p>
-                              <p className="truncate text-xs text-gray-500">
-                                {payment.message || 'Sin detalle'}
-                                {payment.reference ? ` · Ref. ${payment.reference}` : ''}
-                              </p>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="mt-1 text-sm font-semibold text-gray-900">{paymentMethodLabel(payment.method)}</p>
-                              <p className="text-xs text-gray-500">{String(payment.status || 'registrado')}</p>
-                            </div>
-                            <div className={`text-right font-semibold ${amountClass}`}>
-                              {sign}
-                              {formatAmount(Number(payment.amount ?? 0), String(payment.currency ?? reserva.currency))}
-                            </div>
-                          </div>
+                            <p className={`shrink-0 text-sm font-semibold tabular-nums ${neg ? 'text-rose-600' : t === 'payment' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              {neg ? '−' : '+'}{formatAmount(Number(p.amount ?? 0), String(p.currency ?? finance.currency))}
+                            </p>
+                          </li>
                         );
                       })}
+                    </ul>
+                  )}
+                  {showMovementForm && (
+                    <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3.5 ring-1 ring-black/[0.04] sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label>Tipo</Label>
+                        <Select value={form.movementType} onValueChange={(v) => setForm((c) => ({ ...c, movementType: v as PaymentMovementType }))} disabled={savingMovement}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>{Object.entries(movementLabels).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Medio</Label>
+                        <Select value={form.method} onValueChange={(v) => setForm((c) => ({ ...c, method: v }))} disabled={savingMovement}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="transfer">Transferencia</SelectItem>
+                            <SelectItem value="cash">Efectivo</SelectItem>
+                            <SelectItem value="card">Tarjeta</SelectItem>
+                            <SelectItem value="mercadopago">Mercado Pago</SelectItem>
+                            <SelectItem value="admin">Manual</SelectItem>
+                            <SelectItem value="other">Otro</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Monto</Label>
+                        <Input value={form.amount} onChange={(e) => setForm((c) => ({ ...c, amount: e.target.value }))} placeholder="0,00" inputMode="decimal" disabled={savingMovement} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Referencia</Label>
+                        <Input value={form.reference} onChange={(e) => setForm((c) => ({ ...c, reference: e.target.value }))} placeholder="Opcional" disabled={savingMovement} />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label>Detalle</Label>
+                        <Textarea value={form.message} onChange={(e) => setForm((c) => ({ ...c, message: e.target.value }))} placeholder="Ej. seña por transferencia" rows={2} disabled={savingMovement} />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Button size="sm" variant="success" onClick={handleMovement} disabled={savingMovement}>
+                          {savingMovement ? <><Loader2 className="h-4 w-4 animate-spin" />Guardando</> : 'Guardar movimiento'}
+                        </Button>
+                      </div>
                     </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Viaje */}
+              <Card>
+                <div className="flex items-center gap-2">
+                  <Ticket className="h-4 w-4 text-slate-400" />
+                  <h2 className="text-sm font-semibold text-slate-900">Viaje</h2>
+                </div>
+                <dl className="mt-3 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  <div><dt className="text-xs text-slate-400">Salida</dt><dd className="font-medium text-slate-900">{reserva.date === 'sin-fecha' ? 'A coordinar' : formatDate(reserva.date)}</dd></div>
+                  <div><dt className="text-xs text-slate-400">Pasajeros</dt><dd className="font-medium text-slate-900">{reserva.people}</dd></div>
+                  {(pickup || pickupTime) && (
+                    <div className="flex items-start gap-1.5"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><div><dt className="text-xs text-slate-400">Ascenso</dt><dd className="font-medium text-slate-900">{pickup || '—'}{pickupTime ? ` · ${pickupTime}` : ''}</dd></div></div>
+                  )}
+                  {roomType && <div><dt className="text-xs text-slate-400">Habitación</dt><dd className="font-medium capitalize text-slate-900">{roomType}</dd></div>}
+                  {seats.length > 0 && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs text-slate-400">Butacas · {seats.join(', ')}</dt>
+                      {reserva.date !== 'sin-fecha' && (
+                        <dd className="mt-1">
+                          <Button asChild size="sm" variant="outline">
+                            <Link href={`/admin/butacas?packageId=${encodeURIComponent(String(reserva.packageId ?? reserva.experienceId))}&date=${encodeURIComponent(String(reserva.date))}`}>Ver en mapa</Link>
+                          </Button>
+                        </dd>
+                      )}
+                    </div>
+                  )}
+                </dl>
+                {(extras.length > 0 || typeof r.baseSubtotalAmount === 'number') && (
+                  <div className="mt-4 rounded-xl bg-slate-50 px-3.5 py-3 ring-1 ring-black/[0.04]">
+                    {typeof r.baseSubtotalAmount === 'number' && Number(r.baseSubtotalAmount) > 0 && (
+                      <p className="flex justify-between text-sm"><span className="text-slate-500">Base · {reserva.people} {reserva.people === 1 ? 'persona' : 'personas'}</span><span className="font-medium tabular-nums text-slate-900">{formatAmount(Number(r.baseSubtotalAmount), finance.currency)}</span></p>
+                    )}
+                    {extras.map((x, i: number) => {
+                      const rec = x as unknown as Record<string, unknown>;
+                      const amt = Math.max(0, Number(rec.amount ?? 0) || 0);
+                      const eff = String(rec.scope ?? 'per_person') === 'per_booking' ? amt : amt * Math.max(1, reserva.people || 1);
+                      return (
+                        <p key={`${String(rec.label)}-${i}`} className="flex justify-between gap-3 text-sm">
+                          <span className="truncate text-slate-500">+ {String(rec.label ?? '')}</span>
+                          <span className="shrink-0 font-medium tabular-nums text-slate-900">{formatAmount(eff, finance.currency)}</span>
+                        </p>
+                      );
+                    })}
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/70 pt-2">
+                      <p className="text-sm font-semibold text-slate-900">Total <span className="font-normal text-slate-400">· {formatAmount(finance.billedTotal, finance.currency)}</span></p>
+                      <Button size="sm" variant="outline" onClick={() => setShowAddonForm((v) => !v)}>
+                        <Plus className="h-3.5 w-3.5" />{showAddonForm ? 'Cerrar' : 'Sumar adicional'}
+                      </Button>
+                    </div>
+                    {showAddonForm && (
+                      <div className="mt-2 rounded-xl bg-white p-3 ring-1 ring-black/[0.06]">
+                        <p className="text-xs text-slate-500">
+                          Sumá un adicional ya creado (de esta u otra excursión). Se agrega al total y queda registrado como movimiento.
+                        </p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1 sm:col-span-2">
+                            <Label>Buscar adicional</Label>
+                            <Input
+                              value={addonQuery}
+                              onChange={(e) => { setAddonQuery(e.target.value); setAddonPickedKey(''); }}
+                              placeholder="Ej. almuerzo, traslado, fotos…"
+                              disabled={savingAddon || loadingAddons}
+                            />
+                          </div>
+                          <div className="space-y-1 sm:col-span-2">
+                            <Label>Adicional</Label>
+                            <Select value={addonPickedKey || 'none'} onValueChange={setAddonPickedKey} disabled={savingAddon || loadingAddons || filteredAddons.length === 0}>
+                              <SelectTrigger>
+                                <SelectValue placeholder={loadingAddons ? 'Cargando…' : filteredAddons.length ? 'Elegí un adicional' : 'Sin resultados'} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Elegí un adicional</SelectItem>
+                                {filteredAddons.slice(0, 40).map((entry) => (
+                                  <SelectItem key={entry.key} value={entry.key}>
+                                    {entry.addon.title} · ${entry.addon.price.toLocaleString('es-AR')} · {entry.packageTitle}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label>Título</Label>
+                            <Input value={addonTitle} onChange={(e) => setAddonTitle(e.target.value)} placeholder="Se completa solo" disabled={savingAddon} />
+                          </div>
+                          <div className="space-y-1">
+                            <Label>Precio (por reserva)</Label>
+                            <Input value={addonPrice} onChange={(e) => setAddonPrice(e.target.value)} placeholder="0" inputMode="decimal" disabled={savingAddon} />
+                          </div>
+                        </div>
+                        <Button size="sm" variant="success" className="mt-3" onClick={handleAddAddon} disabled={savingAddon}>
+                          {savingAddon ? <><Loader2 className="h-4 w-4 animate-spin" />Sumando</> : 'Sumar a la venta'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-
-              <div className="rounded-2xl border border-black/5 bg-gray-50/70 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Agregar movimiento</p>
-                <div className="mt-3 space-y-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-600">Tipo</Label>
-                    <Select
-                      value={paymentForm.movementType}
-                      onValueChange={(value) =>
-                        setPaymentForm((current) => ({ ...current, movementType: value as PaymentMovementType }))
-                      }
-                      disabled={savingPaymentEvent}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(paymentMovementLabels).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                {extras.length === 0 && (
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3.5 py-3 ring-1 ring-black/[0.04]">
+                    <p className="text-sm text-slate-500">Sin adicionales en esta venta.</p>
+                    <Button size="sm" variant="outline" onClick={() => setShowAddonForm((v) => !v)}>
+                      <Plus className="h-3.5 w-3.5" />{showAddonForm ? 'Cerrar' : 'Sumar adicional'}
+                    </Button>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs font-medium text-gray-600">Monto</Label>
-                      <Input
-                        value={paymentForm.amount}
-                        onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))}
-                        placeholder="0,00"
-                        disabled={savingPaymentEvent}
-                      />
+                )}
+                {extras.length === 0 && showAddonForm && (
+                  <div className="mt-2 rounded-xl bg-slate-50 p-3 ring-1 ring-black/[0.04]">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label>Buscar adicional</Label>
+                        <Input value={addonQuery} onChange={(e) => { setAddonQuery(e.target.value); setAddonPickedKey(''); }} placeholder="Ej. almuerzo, traslado, fotos…" disabled={savingAddon || loadingAddons} />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label>Adicional</Label>
+                        <Select value={addonPickedKey || 'none'} onValueChange={setAddonPickedKey} disabled={savingAddon || loadingAddons || filteredAddons.length === 0}>
+                          <SelectTrigger><SelectValue placeholder={loadingAddons ? 'Cargando…' : 'Elegí un adicional'} /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Elegí un adicional</SelectItem>
+                            {filteredAddons.slice(0, 40).map((entry) => (
+                              <SelectItem key={entry.key} value={entry.key}>
+                                {entry.addon.title} · ${entry.addon.price.toLocaleString('es-AR')} · {entry.packageTitle}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Título</Label>
+                        <Input value={addonTitle} onChange={(e) => setAddonTitle(e.target.value)} placeholder="Se completa solo" disabled={savingAddon} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Precio (por reserva)</Label>
+                        <Input value={addonPrice} onChange={(e) => setAddonPrice(e.target.value)} placeholder="0" inputMode="decimal" disabled={savingAddon} />
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-medium text-gray-600">Medio</Label>
-                      <Select
-                        value={paymentForm.method}
-                        onValueChange={(value) => setPaymentForm((current) => ({ ...current, method: value }))}
-                        disabled={savingPaymentEvent}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="transfer">Transferencia</SelectItem>
-                          <SelectItem value="cash">Efectivo</SelectItem>
-                          <SelectItem value="card">Tarjeta</SelectItem>
-                          <SelectItem value="mercadopago">Mercado Pago</SelectItem>
-                          <SelectItem value="admin">Manual</SelectItem>
-                          <SelectItem value="other">Otro</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <Button size="sm" variant="success" className="mt-3" onClick={handleAddAddon} disabled={savingAddon}>
+                      {savingAddon ? <><Loader2 className="h-4 w-4 animate-spin" />Sumando</> : 'Sumar a la venta'}
+                    </Button>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-600">Referencia</Label>
-                    <Input
-                      value={paymentForm.reference}
-                      onChange={(event) => setPaymentForm((current) => ({ ...current, reference: event.target.value }))}
-                      placeholder="Factura, transferencia, caja, cupón"
-                      disabled={savingPaymentEvent}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium text-gray-600">Detalle</Label>
-                    <Textarea
-                      value={paymentForm.message}
-                      onChange={(event) => setPaymentForm((current) => ({ ...current, message: event.target.value }))}
-                      placeholder="Ej. pago parcial por transferencia, descuento comercial, extra por servicio adicional"
-                      className="min-h-[96px] rounded-2xl border border-black/10 bg-white"
-                      disabled={savingPaymentEvent}
-                    />
-                  </div>
-                  <Button size="sm" variant="success" disabled={savingPaymentEvent} onClick={handleAddPaymentEvent}>
-                    {savingPaymentEvent ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Guardando
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Agregar movimiento
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
+                )}
+                <p className="mt-3 text-xs text-slate-400">
+                  {stockLoading ? 'Consultando disponibilidad…' : stock ? `${stock.available} lugares disponibles de ${stock.baseCapacity} base.` : 'Sin disponibilidad asociada.'}
+                </p>
+              </Card>
 
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              <div className="space-y-2 rounded-2xl bg-gray-50/80 p-4">
+              {/* Cliente y pasajeros — una sola vez */}
+              <Card>
                 <div className="flex items-center gap-2">
-                  <Paperclip className="h-4 w-4 text-gray-500" />
-                  <p className="text-sm font-semibold text-gray-700">
-                    {attachments.length} comprobante{attachments.length !== 1 ? 's' : ''}
-                  </p>
+                  <Users className="h-4 w-4 text-slate-400" />
+                  <h2 className="text-sm font-semibold text-slate-900">Cliente y pasajeros</h2>
                 </div>
-                {attachments.length === 0 ? (
-                  <p className="text-xs text-gray-500">No hay adjuntos.</p>
-                ) : (
-                  <ul className="space-y-2 text-sm text-gray-700">
-                    {attachments.map((attachment) => (
-                      <li
-                        key={attachment.id}
-                        className="flex items-center justify-between rounded-xl bg-white px-3 py-2 shadow-sm"
-                      >
-                        <Link
-                          href={attachment.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="truncate text-sm font-medium text-gray-900 underline-offset-2 hover:underline"
-                        >
-                          {attachment.name}
-                        </Link>
-                        <Badge variant="outline" className="text-[11px] text-gray-500">
-                          {attachment.type || 'Archivo'}
-                        </Badge>
+                <div className="mt-3 space-y-1.5 text-sm">
+                  <p className="font-semibold text-slate-900">{reserva.customerName || 'Sin nombre'}</p>
+                  <p className="flex items-center gap-1.5 text-slate-600"><Mail className="h-3.5 w-3.5 text-slate-400" />{reserva.customerEmail || '—'}</p>
+                  {reserva.customerPhone && <p className="text-slate-600">{reserva.customerPhone}</p>}
+                  <p className="text-slate-600">
+                    {[country ? `${country.flag} ${country.name}` : reserva.customerCountry, reserva.customerDocument ? `DNI ${reserva.customerDocument}` : null, r.customerBirthDate ? `Nac. ${String(r.customerBirthDate)}` : null].filter(Boolean).join(' · ') || ''}
+                  </p>
+                  {reserva.customerComments && <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-600 ring-1 ring-black/[0.04]">{reserva.customerComments}</p>}
+                </div>
+                {travelers.length > 0 && (
+                  <ul className="mt-3 space-y-1.5">
+                    {travelers.map((t, i) => (
+                      <li key={i} className="rounded-xl bg-slate-50 px-3 py-2 text-sm ring-1 ring-black/[0.04]">
+                        <p className="font-medium text-slate-900">{`${String(t.firstName ?? '').trim()} ${String(t.lastName ?? '').trim()}`.trim() || `Pasajero ${i + 2}`}</p>
+                        <p className="text-xs text-slate-500">{[t.birthDate ? `Nac. ${String(t.birthDate)}` : null, t.document ? `DNI ${String(t.document)}` : null, t.phone ? String(t.phone) : null].filter(Boolean).join(' · ')}</p>
                       </li>
                     ))}
                   </ul>
                 )}
-              </div>
-
-              <div className="space-y-3 rounded-2xl bg-gray-50/80 p-4">
-                <label
-                  htmlFor="attachment-upload"
-                  className="flex cursor-pointer items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/80 px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-black/20"
-                >
-                  <span className="flex items-center gap-2">
-                    <UploadCloud className="h-4 w-4 text-gray-500" />
-                    {uploadingAttachments ? 'Subiendo...' : 'Agregar adjuntos'}
-                  </span>
-                  {uploadingAttachments && <Loader2 className="h-4 w-4 animate-spin text-gray-500" />}
-                </label>
-                <input
-                  id="attachment-upload"
-                  type="file"
-                  accept="image/*,.pdf"
-                  multiple
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                {attachments.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Eliminar comprobantes</p>
-                    <div className="space-y-2">
-                      {attachments.map((attachment) => (
-                        <div
-                          key={attachment.id}
-                          className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm text-gray-700 shadow-sm"
-                        >
-                          <span className="truncate font-medium">{attachment.name}</span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-gray-500"
-                            disabled={removingAttachmentIds.includes(attachment.id)}
-                            onClick={() => handleAttachmentDelete(attachment.id)}
-                          >
-                            {removingAttachmentIds.includes(attachment.id) ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
+                {otherPurchases.length > 0 && (
+                  <div className="mt-4 border-t border-slate-100 pt-3">
+                    <Eyebrow>Otras compras del cliente</Eyebrow>
+                    <ul className="mt-2 space-y-1">
+                      {otherPurchases.map((o) => (
+                        <li key={o.id}>
+                          <Link href={`/admin/ventas/${o.id}`} className="text-sm text-slate-600 hover:text-slate-900 hover:underline">
+                            {o.packageTitle || o.experienceTitle || 'Venta'} · {formatDate(o.date)} · {formatAmount(o.amountTotal, o.currency)}
+                          </Link>
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   </div>
                 )}
-              </div>
-            </div>
-          </section>
+              </Card>
 
-          <section className="space-y-4 rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Control de estado</p>
-                <p className="text-xs text-gray-500 sm:text-sm">Los cambios quedan registrados en el historial.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  className="bg-[#DC2626] text-white shadow-[0_8px_18px_rgba(220,38,38,0.22)] hover:bg-[#B91C1C]"
-                  onClick={handleCancelReservation}
-                  disabled={statusUpdating}
-                >
-                  Cancelar venta
-                </Button>
-                <Button variant="success" size="sm" onClick={() => handleStatusUpdate(status)}>
-                  Guardar
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs uppercase tracking-[0.3em] text-gray-400">Estado</Label>
-                <Select value={status} onValueChange={(value) => setStatus(value as ReservationStatus)}>
-                  <SelectTrigger className="rounded-2xl border border-black/10 bg-white py-2">
-                    <SelectValue placeholder="Seleccioná un estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {reservationStatusOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs uppercase tracking-[0.3em] text-gray-400">Nota interna</Label>
-                <Textarea
-                  value={statusNote}
-                  onChange={(event) => setStatusNote(event.target.value)}
-                  placeholder="Describe por qué se cambió el estado"
-                  className="min-h-[96px] rounded-2xl border border-black/10 bg-white"
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Timeline de la venta</p>
-              <div className="mt-3 space-y-3">
-                {reserva.statusHistory?.length ? (
-                  reserva.statusHistory
-                    .slice()
-                    .sort((a, b) => toTimestampMs(b.createdAt) - toTimestampMs(a.createdAt))
-                    .map((entry) => (
-                      <div
-                        key={`${entry.status}-${toTimestampMs(entry.createdAt)}`}
-                        className="space-y-1 rounded-2xl border border-black/5 bg-white/80 px-3 py-2"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Badge variant={statusBadgeVariant[entry.status]} className="capitalize text-xs">
-                            {reservationStatusText(entry.status)}
-                          </Badge>
-                          <span className="text-[11px] text-gray-500">{formatDateTime(entry.createdAt)}</span>
-                        </div>
-                        {entry.note && <p className="text-sm text-gray-700">{entry.note}</p>}
-                      </div>
-                    ))
+              {/* Comprobantes — lista única */}
+              <Card>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Paperclip className="h-4 w-4 text-slate-400" />
+                    <h2 className="text-sm font-semibold text-slate-900">Comprobantes · {attachments.length}</h2>
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-dashed border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-400">
+                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+                    Agregar
+                    <input type="file" accept="image/*,.pdf" multiple className="hidden" onChange={(e) => { uploadFiles(e.target.files); e.target.value = ''; }} />
+                  </label>
+                </div>
+                {attachments.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-500">Sin archivos.</p>
                 ) : (
-                  <p className="text-sm text-gray-500">No hay historial registrado.</p>
+                  <ul className="mt-3 divide-y divide-slate-100 rounded-xl ring-1 ring-black/[0.04]">
+                    {attachments.map((a) => (
+                      <li key={a.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                        <Link href={a.url} target="_blank" rel="noreferrer" className="truncate text-sm font-medium text-slate-900 hover:underline">{a.name || 'Archivo'}</Link>
+                        <Button variant="ghost" size="icon-sm" className="shrink-0 text-slate-400 hover:text-rose-600" disabled={removingIds.includes(a.id)} onClick={() => deleteAttachment(a.id)}>
+                          {removingIds.includes(a.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
-              </div>
+              </Card>
             </div>
 
-            <div className="rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Cliente</p>
-              <div className="mt-3 space-y-2 text-sm text-gray-600">
-                <p className="text-base font-semibold text-gray-900">{reserva.customerName || '—'}</p>
-                <p className="flex items-center gap-2">
-                  <Mail className="h-4 w-4" /> {reserva.customerEmail || '—'}
-                </p>
-                {reserva.customerPhone && (
-                  <p className="flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    {reserva.customerPhone}
-                  </p>
-                )}
-                {reserva.customerCountry && (
-                  <p className="flex items-center gap-2">
-                    <Globe className="h-4 w-4" />
-                    {reserva.customerCountry}
-                  </p>
-                )}
-                {reserva.customerDocument && (
-                  <p className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    {reserva.customerDocument}
-                  </p>
-                )}
-                {(reserva as any).customerBirthDate && (
-                  <p className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Nacimiento: {String((reserva as any).customerBirthDate)}
-                  </p>
-                )}
-                {reserva.customerComments && (
-                  <p className="text-sm text-gray-700">{reserva.customerComments}</p>
-                )}
-                {passengerDetails.length > 0 ? (
-                  <div className="rounded-2xl border border-black/5 bg-gray-50/80 p-4">
-                    <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Pasajeros</p>
-                    <div className="mt-3 space-y-2">
-                      {passengerDetails.map((traveler: any, index: number) => (
-                        <div key={`traveler-${index}`} className="rounded-2xl bg-white px-3 py-2 text-sm text-gray-700 ring-1 ring-black/5">
-                          <p className="font-medium text-gray-900">
-                            {traveler.firstName || '—'} {traveler.lastName || ''}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {traveler.birthDate ? `Nacimiento ${traveler.birthDate}` : 'Nacimiento sin dato'}
-                            {traveler.document ? ` · DNI ${traveler.document}` : ''}
-                            {traveler.phone ? ` · ${traveler.phone}` : ''}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
+            {/* Columna lateral */}
+            <div className="flex flex-col gap-4">
+              <Card>
+                <Eyebrow>Estado</Eyebrow>
+                <div className="mt-2 space-y-2.5">
+                  <Select value={status} onValueChange={(v) => setStatus(v as ReservationStatus)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{reservationStatusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Textarea value={statusNote} onChange={(e) => setStatusNote(e.target.value)} placeholder="Nota interna (opcional)" rows={2} />
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="success" className="flex-1" disabled={busy} onClick={() => handleStatus(status)}>Guardar</Button>
+                    {reserva.status !== 'cancelled' && (
+                      <Button size="sm" variant="outline" className="text-rose-600 hover:text-rose-700" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancelar</Button>
+                    )}
                   </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
+                </div>
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <Eyebrow>Historial</Eyebrow>
+                  <ol className="mt-2 space-y-2.5 border-l border-slate-200 pl-3">
+                    {(reserva.statusHistory ?? []).slice().sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt)).slice(0, 6).map((h, i) => (
+                      <li key={i} className="relative text-xs">
+                        <span className="absolute -left-[17px] top-1 h-2 w-2 rounded-full bg-slate-300 ring-2 ring-white" />
+                        <p className="font-medium capitalize text-slate-700">{ventaStatusLabel(h.status)}</p>
+                        <p className="text-slate-400">{formatDateTime(h.createdAt)}</p>
+                        {h.note && <p className="mt-0.5 text-slate-600">{h.note}</p>}
+                      </li>
+                    ))}
+                    {!(reserva.statusHistory ?? []).length && <p className="text-xs text-slate-400">Sin historial.</p>}
+                  </ol>
+                </div>
+              </Card>
 
-          <section className="rounded-3xl bg-white/90 p-4 shadow-lg ring-1 ring-black/5 sm:p-5">
-            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-400">Registro</p>
-            <p className="mt-2 text-xs text-gray-600 sm:text-sm">
-              {`Creada el ${formatDateTime(reserva.createdAt)}.`}
-            </p>
-            {reserva.updatedAt && (
-              <p className="text-xs text-gray-500 sm:text-sm">
-                Última modificación: {formatDateTime(reserva.updatedAt)}
-              </p>
-            )}
-          </section>
+              <Card>
+                <div className="flex items-center gap-2">
+                  <MailCheck className="h-4 w-4 text-slate-400" />
+                  <h2 className="text-sm font-semibold text-slate-900">Comunicación</h2>
+                </div>
+                <ul className="mt-3 space-y-2.5 text-sm">
+                  <li className="flex items-center justify-between gap-2">
+                    <div><p className="font-medium text-slate-700">Confirmación</p><p className="text-xs text-slate-400">{emailLabel(String(venta?.customerConfirmationEmailStatus ?? 'not_sent'))}</p></div>
+                  </li>
+                  <li className="flex items-center justify-between gap-2">
+                    <div><p className="font-medium text-slate-700">Voucher 48 hs</p><p className="text-xs text-slate-400">{voucherLabel(String(venta?.voucherStatus ?? 'not_generated'))}{reserva.voucherSentAt ? ` · ${formatDateTime(reserva.voucherSentAt)}` : reserva.voucherScheduledAt ? ` · prog. ${formatDateTime(reserva.voucherScheduledAt)}` : ''}</p></div>
+                  </li>
+                  <li className="flex items-center justify-between gap-2">
+                    <div><p className="font-medium text-slate-700">Aviso interno</p><p className="text-xs text-slate-400">{emailLabel(String(venta?.adminEmailStatus ?? 'not_sent'))}</p></div>
+                  </li>
+                </ul>
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => enqueue('customer')}><ReceiptText className="h-4 w-4" />Voucher</Button>
+                  <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => enqueue('admin')}><Mail className="h-4 w-4" />Admin</Button>
+                </div>
+              </Card>
+
+              <Card>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Store className="h-4 w-4 text-slate-400" />
+                    <h2 className="text-sm font-semibold text-slate-900">Vendedor</h2>
+                  </div>
+                  {reserva.referredBy && <Badge variant="outline" className="capitalize">{reserva.referredBy.payoutStatus}</Badge>}
+                </div>
+                <p className="mt-1 text-sm text-slate-600">
+                  {reserva.referredBy ? `${reserva.referredBy.vendorName}${reserva.referredBy.code ? ` · ${reserva.referredBy.code}` : ''}` : 'Sin vendedor asignado'}
+                </p>
+                {reserva.referredBy && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Comisión {Number(reserva.referredBy.commissionAmount / 100).toLocaleString('es-AR')} {String(reserva.referredBy.commissionCurrency).toUpperCase()}
+                    {reserva.referredBy.commissionType === 'percent' ? ` (${reserva.referredBy.commissionValue}%)` : ''}
+                  </p>
+                )}
+                <div className="mt-3 space-y-2">
+                  <Select value={vendorId || 'none'} onValueChange={(v) => { setVendorId(v === 'none' ? '' : v); setPickedCode(''); setManualCode(''); }} disabled={savingReferral}>
+                    <SelectTrigger><SelectValue placeholder="Elegí vendedor" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin vendedor</SelectItem>
+                      {vendors.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Select value={pickedCode || 'none'} onValueChange={(v) => { setPickedCode(v === 'none' ? '' : v); setManualCode(''); }} disabled={!vendorId || !linksForPackage.length || linksLoading || savingReferral}>
+                    <SelectTrigger><SelectValue placeholder={linksLoading ? 'Cargando…' : 'Código'} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin código</SelectItem>
+                      {linksForPackage.map((l) => <SelectItem key={l.id} value={l.code}>{l.code}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input value={manualCode} onChange={(e) => { setManualCode(e.target.value); if (e.target.value.trim()) setPickedCode(''); }} placeholder="O código manual" disabled={savingReferral} />
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="success" className="flex-1" disabled={savingReferral || (!vendorId && !pickedCode && !manualCode.trim())} onClick={() => handleReferral(false)}>
+                      {savingReferral ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
+                    </Button>
+                    {reserva.referredBy && <Button size="sm" variant="outline" disabled={savingReferral} onClick={() => handleReferral(true)}>Quitar</Button>}
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
         </div>
+
+        <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+          <AlertDialogContent className="rounded-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Cancelar la venta?</AlertDialogTitle>
+              <AlertDialogDescription>Se libera el cupo y se marca como cancelada. Queda en el historial.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Volver</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700"
+                onClick={() => { setConfirmCancel(false); handleStatus('cancelled', 'Cancelada desde el panel'); }}
+              >
+                Cancelar venta
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </AdminLayout>
     </ProtectedRoute>
   );

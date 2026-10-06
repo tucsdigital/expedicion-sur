@@ -18,9 +18,43 @@ function getSearchResults(payload: any): any[] {
   return [];
 }
 
+const directPayloadSchema = z.object({
+  orderId: z.string().min(1).optional(),
+  paymentId: z.string().trim().optional(),
+  intentId: z.string().trim().optional(),
+  reservationId: z.string().trim().optional(),
+});
+
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  const parsed = payloadSchema.safeParse(body);
+  // Verificación manual del flujo directo (checkout sin carrito): delega a
+  // verify-direct, que crea la reserva + emails consultando el pago en MP.
+  // Sirve para localhost (donde el webhook no llega) y como fallback.
+  const rawBody = await request.json().catch(() => null);
+  const directParsed = directPayloadSchema.safeParse(rawBody ?? {});
+  const directIntentId = String(directParsed.success ? (directParsed.data.intentId ?? '') : '').trim();
+  const directReservationId = String(directParsed.success ? (directParsed.data.reservationId ?? '') : '').trim();
+  const directPaymentId = String(directParsed.success ? (directParsed.data.paymentId ?? '') : '').trim();
+  if (directIntentId || directReservationId) {
+    if (!directParsed.success) {
+      return NextResponse.json({ error: 'Datos inválidos.' }, { status: 400 });
+    }
+    const directUrl = new URL('/api/mercadopago/verify-direct', request.url);
+    const directResponse = await fetch(directUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intentId: directIntentId || undefined,
+        reservationId: directReservationId || undefined,
+        paymentId: directPaymentId || undefined,
+      }),
+    });
+    const directResult = await directResponse.json().catch(() => null);
+    return NextResponse.json(directResult, { status: directResponse.ok ? 200 : directResponse.status });
+  }
+
+  // Flujo carrito: procesar el pago vía webhook con el paymentId resuelto.
+
+  const parsed = payloadSchema.safeParse(rawBody);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Datos inválidos.' }, { status: 400 });
   }

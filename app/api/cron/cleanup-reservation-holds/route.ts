@@ -66,6 +66,15 @@ async function fetchExpiredHolds(batchSize: number): Promise<{ id: string; data:
 }
 
 export async function POST(request: Request) {
+  return processExpiredHolds(request);
+}
+
+export async function GET(request: Request) {
+  // GET para Vercel Cron.
+  return processExpiredHolds(request);
+}
+
+async function processExpiredHolds(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }

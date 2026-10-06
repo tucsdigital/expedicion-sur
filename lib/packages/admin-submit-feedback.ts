@@ -108,7 +108,6 @@ const FIELD_TARGETS: Record<string, string> = {
   precio: '#precio',
   tarifaEspecialPrecio: '#tarifaEspecialPrecio',
   tarifaEspecialFechaLimite: '#tarifaEspecialFechaLimite',
-  maxPersonasPorReserva: '#maxPersonasPorReserva',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -123,7 +122,6 @@ const FIELD_LABELS: Record<string, string> = {
   precio: 'Precio',
   tarifaEspecialPrecio: 'Tarifa especial',
   tarifaEspecialFechaLimite: 'Fecha limite',
-  maxPersonasPorReserva: 'Maximo de personas por reserva',
 };
 
 export function getFieldLabelFromPath(path: string | null | undefined) {

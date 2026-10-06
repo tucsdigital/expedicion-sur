@@ -265,7 +265,7 @@ export default async function ExperienciaPage({ params }: { params: Promise<{ sl
               ) : null}
             </div>
 
-            <PaqueteItinerary steps={paquete.itinerarioSteps} html={paquete.itinerario} visible={paquete.mostrarItinerario} />
+            <PaqueteItinerary steps={paquete.itinerarioSteps} html={paquete.itinerario} />
 
             {(paquete.incluye.length > 0 || (paquete.noIncluye && paquete.noIncluye.length > 0)) && (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

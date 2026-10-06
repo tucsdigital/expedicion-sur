@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, Loader2, RotateCcw } from 'lucide-react';
+import { useTranslations } from '@/lib/messages';
 import { Badge } from '@/components/ui/badge';
 
 type VerifyResponse = {
@@ -20,6 +21,7 @@ export default function SuccessVerification({
   sessionId: string;
   debug?: boolean;
 }) {
+  const t = useTranslations('checkout');
   const [data, setData] = useState<VerifyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
@@ -51,7 +53,7 @@ export default function SuccessVerification({
         const res = await fetch(`/api/checkout/verify?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
         if (!res.ok) {
           const body = await res.json().catch(() => null);
-          throw new Error(body?.error ?? 'No se pudo verificar');
+          throw new Error(body?.error ?? t('verificationError'));
         }
         const payload = (await res.json()) as VerifyResponse;
         if (!active) return null;
@@ -60,7 +62,7 @@ export default function SuccessVerification({
         return payload;
       } catch (e) {
         if (!active) return null;
-        setError(e instanceof Error ? e.message : 'No se pudo verificar');
+      setError(e instanceof Error ? e.message : t('verificationError'));
         return null;
       }
     };
@@ -82,14 +84,14 @@ export default function SuccessVerification({
         });
         if (!res.ok) {
           const body = await res.json().catch(() => null);
-          throw new Error(body?.error ?? 'No se pudo finalizar');
+          throw new Error(body?.error ?? t('finalizationError'));
         }
         const next = (await res.json()) as VerifyResponse;
         if (!active) return;
         setData(next);
       } catch (e) {
         if (!active) return;
-        setError(e instanceof Error ? e.message : 'No se pudo finalizar');
+        setError(e instanceof Error ? e.message : t('finalizationError'));
       } finally {
         if (!active) return;
         setFinalizing(false);
@@ -273,12 +275,12 @@ export default function SuccessVerification({
         </p>
 
         <div className="mt-3 space-y-2">
-          <Step ok={paid} loading={!paid} label={paid ? 'Pago confirmado' : 'Confirmando pago'} />
-          <Step ok={isReservaReady} loading={paid && !isReservaReady} label={isReservaReady ? 'Reserva registrada' : 'Registrando reserva'} />
+          <Step ok={paid} loading={!paid} label={paid ? t('paymentConfirmed') : t('confirmingPayment')} />
+          <Step ok={isReservaReady} loading={paid && !isReservaReady} label={isReservaReady ? t('reservationRegistered') : t('registeringReservation')} />
           <Step
             ok={isClienteEmailQueued}
             loading={paid && isReservaReady && !isClienteEmailQueued}
-            label={isClienteEmailQueued ? 'Confirmación por email en camino' : 'Preparando confirmación por email'}
+            label={isClienteEmailQueued ? t('emailQueued') : t('confirmingPayment')}
           />
         </div>
       </div>
@@ -290,10 +292,10 @@ export default function SuccessVerification({
       <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
         <span className="font-medium">Verificación automática</span>
         <Badge variant={paid ? 'default' : 'outline'} className="capitalize">
-          {paid ? 'Pago OK' : data.paymentStatus}
+          {paid ? t('statusPaid') : data.paymentStatus}
         </Badge>
         <Badge variant={data.reservaExists ? 'secondary' : 'outline'} className="capitalize">
-          {data.reservaExists ? `Reserva: ${data.reservaStatus ?? 'registrada'}` : finalizing ? 'Finalizando reserva...' : 'Registrando reserva...'}
+          {data.reservaExists ? `${t('reservation')}: ${data.reservaStatus ?? t('reservationRegistered')}` : finalizing ? t('registeringReservation') : t('registeringReservation')}
         </Badge>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">

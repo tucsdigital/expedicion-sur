@@ -5,11 +5,13 @@ import Navbar from '@/components/Navbar';
 import { getPaqueteBySlug } from '@/lib/paquetes';
 import ClearCheckoutStorage from '@/components/checkout/ClearCheckoutStorage';
 import SuccessVerification from '@/components/checkout/SuccessVerification';
+import DirectVerification from '@/components/checkout/DirectVerification';
 import OrderVerification from '@/components/checkout/OrderVerification';
 import { CONTACT_INFO, SITE_NAME, SOCIAL_MEDIA } from '@/lib/constants';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { buildVentaStatuses } from '@/lib/sales/status';
+import { getLocale, getTranslations } from '@/lib/messages';
 
 /** Sin caché: datos de paquete siempre actualizados */
 export const revalidate = 0;
@@ -20,6 +22,7 @@ type SearchParams = Promise<{
   date?: string;
   people?: string;
   sessionId?: string;
+  intentId?: string;
   amount?: string;
   currency?: string;
   paymentMethod?: string;
@@ -108,53 +111,55 @@ function resolveOrderDisplayStatus(params: {
 function orderHeadline(params: {
   statusRaw: unknown;
   reservationReady: boolean;
+  t: (key: string) => string;
 }): { title: string; subtitle: string; tone: 'success' | 'pending' | 'warning' | 'error' } {
+  const t = params.t;
   const s = String(params.statusRaw ?? '');
   if (params.reservationReady) {
     return {
-      title: 'Compra confirmada',
-      subtitle: 'Gracias por tu compra. Tu pago fue procesado correctamente y tu reserva quedó confirmada.',
+      title: t('confirmedPurchase'),
+      subtitle: t('confirmedPurchaseDescription'),
       tone: 'success',
     };
   }
   if (s === 'payment_approved_processing') {
     return {
-      title: 'Pago aprobado',
-      subtitle: 'Tu pago fue procesado correctamente. Estamos terminando de registrar tu reserva y generar tu código.',
+      title: t('approved'),
+      subtitle: t('approvedDescription'),
       tone: 'success',
     };
   }
   if (s === 'pending' || s === 'checkout_started') {
     return {
-      title: 'Pago pendiente',
-      subtitle: 'Tu pago está en proceso. Si se aprueba, confirmaremos la compra automáticamente.',
+      title: t('pending'),
+      subtitle: t('pendingDescription'),
       tone: 'pending',
     };
   }
   if (s === 'needs_review') {
     return {
-      title: 'Compra en revisión',
-      subtitle: 'Recibimos tu pago, pero necesitamos validar disponibilidad. Te contactaremos a la brevedad.',
+      title: t('review'),
+      subtitle: t('reviewDescription'),
       tone: 'warning',
     };
   }
   if (s === 'expired') {
     return {
-      title: 'Orden vencida',
-      subtitle: 'El pago no se confirmó dentro del tiempo de espera. Si necesitás ayuda, escribinos por WhatsApp.',
+      title: t('expired'),
+      subtitle: t('expiredDescription'),
       tone: 'error',
     };
   }
   if (s === 'failed' || s === 'cancelled') {
     return {
-      title: 'No se pudo confirmar el pago',
-      subtitle: 'Si creés que es un error o necesitás ayuda, escribinos por WhatsApp y lo revisamos.',
+      title: t('failed'),
+      subtitle: t('failedDescription'),
       tone: 'error',
     };
   }
   return {
-    title: 'Estamos procesando tu compra',
-    subtitle: 'Estamos verificando el estado del pago. Si se aprueba, confirmaremos la compra automáticamente.',
+    title: t('processing'),
+    subtitle: t('processingDescription'),
     tone: 'pending',
   };
 }
@@ -165,12 +170,15 @@ export default async function CheckoutSuccessPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
+  const locale = await getLocale();
+  const t = await getTranslations('success');
   const externalReference = params.external_reference?.trim() || '';
   const orderId = params.orderId?.trim() || getOrderIdFromExternalReference(externalReference);
   const slug = params.slug?.trim() || '';
   const date = params.date?.trim() || '';
   const peopleParam = params.people?.trim();
   const sessionId = params.sessionId?.trim() || '';
+  const intentId = params.intentId?.trim() || '';
   const amountParam = params.amount?.trim();
   const amount = amountParam ? parseInt(amountParam, 10) : 0;
   const currency = params.currency?.trim() || 'ars';
@@ -183,6 +191,12 @@ export default async function CheckoutSuccessPage({
         ? '1 persona'
         : `${people} personas`
       : '';
+
+  // Flujo directo (sin carrito): NO consultar Mercado Pago desde el Server
+  // Component. El componente cliente <DirectVerification /> hace la
+  // verificación (POST verify-direct) con reintentos: el pago tarda unos
+  // segundos en estar disponible y acá solo tenemos un intento, casi siempre
+  // antes de que MP lo publique (devolvía 404 y confundía).
 
   let order: any = null;
   if (orderId) {
@@ -251,10 +265,6 @@ export default async function CheckoutSuccessPage({
       : Array.isArray(primaryReservation?.selectedSeats) && primaryReservation.selectedSeats.length > 0
         ? primaryReservation.selectedSeats.join(', ')
         : '';
-  const pickupPointLabel =
-    String(primaryReservation?.pickupPoint ?? primaryItem?.pickupPoint ?? '').trim() || '';
-  const pickupPointTimeLabel =
-    String(primaryReservation?.pickupPointTime ?? primaryItem?.pickupPointTime ?? '').trim() || '';
   const selectedExtras = Array.isArray(primaryReservation?.selectedExtras)
     ? primaryReservation.selectedExtras
     : Array.isArray(primaryItem?.selectedExtras)
@@ -279,7 +289,7 @@ export default async function CheckoutSuccessPage({
   const whatsappHref = `${SOCIAL_MEDIA.whatsapp}?text=${encodeURIComponent(whatsappText)}`;
 
   const hasSession = Boolean(sessionId);
-  const heading = orderId ? orderHeadline({ statusRaw: orderDisplayStatus, reservationReady }) : null;
+  const heading = orderId ? orderHeadline({ statusRaw: orderDisplayStatus, reservationReady, t: (key) => t(key as never) }) : null;
   const icon =
     !orderId
       ? <CheckCircle className="h-12 w-12" strokeWidth={2} />
@@ -312,16 +322,16 @@ export default async function CheckoutSuccessPage({
               {icon}
             </div>
             <h1 className="mt-6 text-2xl font-bold text-gray-900 md:text-3xl">
-              {orderId ? (heading?.title ?? 'Tu compra') : '¡Reserva confirmada!'}
+              {orderId ? (heading?.title ?? t('confirmedPurchase')) : t('reservationConfirmed')}
             </h1>
             <p className="mt-3 text-base text-gray-600">
-              {orderId ? (heading?.subtitle ?? 'Estamos verificando el estado del pago.') : 'Tu pago se procesó correctamente. Estamos confirmando tu reserva y el envío de los emails automáticamente.'}
+              {orderId ? (heading?.subtitle ?? t('processingDescription')) : t('paymentProcessed')}
             </p>
           </div>
 
           <div className="mt-8 rounded-xl border border-gray-100 bg-gray-50/80 p-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Detalle de la reserva
+              {t('details')}
             </p>
             <div className="mt-4 space-y-4 text-sm text-gray-700">
               <div>
@@ -330,7 +340,7 @@ export default async function CheckoutSuccessPage({
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Fecha</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{t('date')}</p>
                   <p className="mt-1 capitalize">{dateLabel}</p>
                 </div>
                 {entriesLabel ? (
@@ -346,17 +356,6 @@ export default async function CheckoutSuccessPage({
                   <p className="mt-1">{locationLabel}</p>
                 </div>
               ) : null}
-              {pickupPointLabel ? (
-                <div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Ascenso</p>
-                    <p className="mt-1">
-                      {pickupPointLabel}
-                      {pickupPointTimeLabel ? ` · ${pickupPointTimeLabel}` : ''}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
               {selectedExtras.length > 0 ? (
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Extras</p>
@@ -365,7 +364,7 @@ export default async function CheckoutSuccessPage({
                   </p>
                 </div>
               ) : null}
-              <div className="grid gap-4 sm:grid-cols-2">
+              {/* <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Total abonado</p>
                   <p className="mt-1 font-semibold text-gray-900">{amountLabel}</p>
@@ -377,20 +376,20 @@ export default async function CheckoutSuccessPage({
                   ) : null}
                 </div>
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Estado del pago</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{t('paymentStatus')}</p>
                   <p className="mt-1">{paymentStatusLabel}</p>
                 </div>
-              </div>
+              </div> */}
               {orderId ? (
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Número de orden</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{t('orderNumber')}</p>
                   <p className="mt-1">{orderId}</p>
                 </div>
               ) : null}
               {orderId ? (
                 <div className="border-t border-gray-200 pt-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                    {reservationCodeValues.length > 1 ? 'Códigos de reserva' : 'Código de reserva'}
+                    {reservationCodeValues.length > 1 ? t('reservationCodes') : t('reservationCode')}
                   </p>
                   {reservationCodeValues.length > 0 ? (
                     <div className="mt-2 space-y-2">
@@ -405,20 +404,19 @@ export default async function CheckoutSuccessPage({
                     </div>
                   ) : (
                     <div className="mt-2 space-y-2 text-sm text-gray-600">
-                      <p>Estamos generando tu código de reserva.</p>
-                      <p>Lo recibirás en los próximos minutos por correo electrónico y/o WhatsApp.</p>
+                      <p>{t('generatingCode')}</p>
+                      <p>{t('codeDelivery')}</p>
                       <p>Si luego de unos minutos no lo recibís, comunicate con nuestro equipo de soporte.</p>
                     </div>
                   )}
                 </div>
               ) : null}
             </div>
-            {!orderId && !hasSession && (
+            {/* {!orderId && !hasSession && (
               <p className="mt-3 rounded-lg bg-yellow-50 p-3 text-xs text-yellow-700">
-                No detectamos el identificador de sesión. Si esto sucede, escribinos por WhatsApp
-                o mandá un email a {CONTACT_INFO.email} para que lo verifiquemos.
+                {t('missingSession', { email: CONTACT_INFO.email })}
               </p>
-            )}
+            )} */}
           </div>
 
           {orderId ? (
@@ -427,7 +425,9 @@ export default async function CheckoutSuccessPage({
               paymentId={paymentId}
               initialPaymentApproved={mpReturnStatus === 'approved'}
             />
-          ) : (hasSession ? <SuccessVerification sessionId={sessionId} /> : null)}
+          ) : (hasSession ? <SuccessVerification sessionId={sessionId} /> : intentId ? (
+            <DirectVerification intentId={intentId} paymentId={paymentId} />
+          ) : null)}
 
           <div className="mt-8 space-y-4">
             <p className="text-center text-sm font-medium text-gray-700">
@@ -440,13 +440,13 @@ export default async function CheckoutSuccessPage({
               </li>
               <li className="flex items-start gap-3">
                 <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-                <span>Verificá tu WhatsApp.</span>
+                <span>{t('checkWhatsApp')}</span>
               </li>
               <li className="flex items-start gap-3">
                 <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-success" />
                 <span>
                   {reservationCodeValues.length > 0
-                    ? 'Presentá tu código de reserva el día de la actividad.'
+                    ? t('presentCode')
                     : 'Si luego de unos minutos no recibís el código, comunicate con soporte.'}
                 </span>
               </li>
@@ -457,25 +457,25 @@ export default async function CheckoutSuccessPage({
             <Button asChild className="gap-2">
               <Link href={whatsappHref} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="h-4 w-4" />
-                Escribir por WhatsApp
+                {t('writeWhatsApp')}
               </Link>
             </Button>
             {slug && (
               <Button asChild variant="outline" className="gap-2">
-                  <Link href={`/experiencia/${slug}`}>
+                <Link href={`/experiencia/${slug}`}>
                   Ver excursión
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
             )}
             <Button asChild variant="outline">
-              <Link href="/">Ir al inicio</Link>
+              <Link href={'/'}>{t('goHome')}</Link>
             </Button>
           </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-500">
-          {SITE_NAME} · Cualquier consulta: {CONTACT_INFO.email}
+          {SITE_NAME} · {t('questions', { email: CONTACT_INFO.email })}
         </p>
       </div>
     </div>

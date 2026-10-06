@@ -2,24 +2,28 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Calendar, ChevronRight, CreditCard, Loader2, Lock, Mail, ShieldCheck, User } from 'lucide-react';
+import { ArrowLeft, Baby, Calendar, ChevronRight, CreditCard, Loader2, Lock, Mail, ReceiptText, ShieldCheck, TicketPlus, User, Users } from 'lucide-react';
 import type { Experience } from '@/components/landing-reserva/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArgentineDateInput } from '@/components/ui/argentine-date-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { NationalitySelect } from '@/components/ui/nationality-select';
+import { PhoneWithPrefixInput } from '@/components/ui/phone-with-prefix-input';
 import { Textarea } from '@/components/ui/textarea';
-import { getSpanishCountries } from '@/lib/countries';
+import { applyPhonePrefix, getCountryDialCode } from '@/lib/countries';
+import { buildLeadTimeMessage, getMinLeadHours, isDateBookable } from '@/lib/packages/booking-rules';
 import type { PeopleBreakdown } from '@/lib/packages/people-categories';
+import { useTranslations } from '@/lib/messages';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const NAME_MIN_LENGTH = 2;
-const PHONE_MIN_LENGTH = 8;
-const CHECKOUT_STORAGE_PREFIX = 'checkout_form_';
+const PHONE_MIN_DIGITS = 8;
+const CHECKOUT_STORAGE_PREFIX = 'checkout_form_v2_';
 
 type CheckoutPricing = {
   unitAmountAdults: number;
@@ -37,19 +41,28 @@ type CheckoutClientProps = {
   pax?: PeopleBreakdown;
   pricing?: CheckoutPricing;
   initialError?: string | null;
+  selectedAddons?: Array<{ id: string; title: string; amount: number }>;
 };
 
 type CheckoutStep = 'form' | 'payment';
+type PaymentMethod = 'mercadopago';
+
+function paymentMethodForCountry(countryName: string): PaymentMethod | null {
+  const normalized = countryName.trim().toLocaleLowerCase('es');
+  if (!normalized) return null;
+  return 'mercadopago';
+}
 
 type CheckoutFormState = {
   customerFirstName: string;
   customerLastName: string;
   customerEmail: string;
+  customerCountry: string;
   customerPhone: string;
   customerDocument: string;
   customerBirthDate: string;
-  customerNationality: string;
-  customerDietaryRestrictions: string;
+  customerAge: string;
+  customerHotel: string;
   customerComments: string;
 };
 
@@ -77,6 +90,12 @@ const PEOPLE_CATEGORY_LABELS: Record<string, string> = {
   children: 'Niños',
 };
 
+const PEOPLE_CATEGORY_ICONS: Record<string, typeof User> = {
+  adults: User,
+  minors: Baby,
+  children: Baby,
+};
+
 function getSiteUrl() {
   return typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL ?? '';
 }
@@ -85,21 +104,27 @@ function getCheckoutStorageKey(slug: string, date: string, people: number) {
   return `${CHECKOUT_STORAGE_PREFIX}${slug}_${date}_${people}`;
 }
 
-function formatAmount(amount: number, currency: string) {
+function countPhoneDigits(value: string) {
+  return String(value ?? '').replace(/\D+/g, '').length;
+}
+
+function formatMoney(amount: number, currency: string) {
   const normalized = (currency || 'ars').toUpperCase();
   const locale = normalized === 'USD' ? 'en-US' : normalized === 'BRL' ? 'pt-BR' : 'es-AR';
   const symbol = normalized === 'USD' ? 'US$' : normalized === 'BRL' ? 'R$' : '$';
   return `${symbol} ${new Intl.NumberFormat(locale, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount)} ${normalized}`;
+  }).format(amount)}`;
 }
 
-export default function CheckoutClient({ experience, date, people, pax, pricing, initialError }: CheckoutClientProps) {
+export default function CheckoutClient({ experience, date, people, pax, pricing, initialError, selectedAddons }: CheckoutClientProps) {
+  const t = useTranslations('checkout');
   const travelerCount = Math.max(1, people);
   const storageKey = getCheckoutStorageKey(experience.slug, date, travelerCount);
   const [step, setStep] = useState<CheckoutStep>('form');
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [passengers, setPassengers] = useState<TravelerFormState[]>([]);
   const [referralCode, setReferralCode] = useState<string | null>(null);
@@ -108,21 +133,21 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
     firstName: false,
     lastName: false,
     email: false,
+    country: false,
     phone: false,
     document: false,
     birthDate: false,
-    nationality: false,
-    dietaryRestrictions: false,
   });
   const [form, setForm] = useState<CheckoutFormState>({
     customerFirstName: '',
     customerLastName: '',
     customerEmail: '',
+    customerCountry: '',
     customerPhone: '',
     customerDocument: '',
     customerBirthDate: '',
-    customerNationality: '',
-    customerDietaryRestrictions: '',
+    customerAge: '',
+    customerHotel: '',
     customerComments: '',
   });
 
@@ -130,24 +155,31 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
   const currency = pricing?.currency ?? (bookingConfig?.currency === 'usd' || bookingConfig?.currency === 'brl' ? bookingConfig.currency : 'ars');
   const total = pricing?.subtotalAmount ?? 0;
   const extrasTotalAmount = pricing?.extrasTotalAmount ?? 0;
+  const baseSubtotalAmount = Math.max(0, pricing?.baseSubtotalAmount ?? total - extrasTotalAmount);
+  const showPriceBreakdown = total > 0;
   const dateLabel =
     date && date !== 'sin-fecha'
       ? new Date(`${date}T12:00:00`).toLocaleDateString('es-AR', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-        })
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
       : 'A coordinar';
 
   const checkoutExtras = useMemo(() => {
-    if (extrasTotalAmount <= 0) {
-      return { items: [] as Array<{ label: string; amount: number }> };
+    const items: Array<{ id: string; label: string; amount: number }> = [];
+    if (Array.isArray(selectedAddons)) {
+      for (const addon of selectedAddons) {
+        const amount = Math.max(0, Math.round(Number((addon as any)?.amount ?? 0) || 0));
+        const id = String((addon as any)?.id ?? '').trim();
+        const label = String((addon as any)?.title ?? '').trim();
+        if (!label || amount <= 0) continue;
+        items.push({ id, label, amount });
+      }
     }
-    return {
-      items: [{ label: 'Gastos administrativos', amount: extrasTotalAmount }],
-    };
-  }, [extrasTotalAmount]);
+    return { items };
+  }, [selectedAddons]);
 
   const paxSummary = useMemo(
     () =>
@@ -159,10 +191,10 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
 
   const steps = useMemo(
     () => [
-      { id: 'form' as const, title: 'Tus datos', icon: User },
-      { id: 'payment' as const, title: 'Pago', icon: CreditCard },
+      { id: 'form' as const, title: t('yourData'), icon: User },
+      { id: 'payment' as const, title: t('payment'), icon: CreditCard },
     ],
-    []
+    [t]
   );
 
   useEffect(() => {
@@ -175,11 +207,12 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
           ...(parsed.customerFirstName != null && { customerFirstName: String(parsed.customerFirstName) }),
           ...(parsed.customerLastName != null && { customerLastName: String(parsed.customerLastName) }),
           ...(parsed.customerEmail != null && { customerEmail: String(parsed.customerEmail) }),
+          ...(parsed.customerCountry != null && { customerCountry: String(parsed.customerCountry) }),
           ...(parsed.customerPhone != null && { customerPhone: String(parsed.customerPhone) }),
           ...(parsed.customerDocument != null && { customerDocument: String(parsed.customerDocument) }),
           ...(parsed.customerBirthDate != null && { customerBirthDate: String(parsed.customerBirthDate) }),
-          ...(parsed.customerNationality != null && { customerNationality: String(parsed.customerNationality) }),
-          ...(parsed.customerDietaryRestrictions != null && { customerDietaryRestrictions: String(parsed.customerDietaryRestrictions) }),
+          ...(parsed.customerAge != null && { customerAge: String(parsed.customerAge) }),
+          ...(parsed.customerHotel != null && { customerHotel: String(parsed.customerHotel) }),
           ...(parsed.customerComments != null && { customerComments: String(parsed.customerComments) }),
         }));
       }
@@ -188,6 +221,16 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
     }
     setRestored(true);
   }, [storageKey]);
+
+  useEffect(() => {
+    if (!restored) return;
+    setForm((prev) => {
+      const dial = getCountryDialCode(prev.customerCountry);
+      if (!dial) return prev;
+      const nextPhone = applyPhonePrefix(prev.customerPhone, dial);
+      return nextPhone === prev.customerPhone ? prev : { ...prev, customerPhone: nextPhone };
+    });
+  }, [restored]);
 
   useEffect(() => {
     if (!restored) return;
@@ -202,7 +245,10 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
     try {
       const url = new URL(window.location.href);
       const code = url.searchParams.get('ref') || url.searchParams.get('referral') || url.searchParams.get('code');
-      setReferralCode(code && code.trim() ? code.trim() : null);
+      const stored = code && code.trim() ? '' : sessionStorage.getItem('referral_code') || '';
+      const resolved = (code && code.trim()) || stored.trim();
+      if (code && code.trim()) sessionStorage.setItem('referral_code', code.trim());
+      setReferralCode(resolved || null);
     } catch {
       setReferralCode(null);
     }
@@ -216,13 +262,35 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
     });
   }, [travelerCount]);
 
+  const bookingLeadHours = getMinLeadHours(bookingConfig);
+  const [renderedAt] = useState(() => Date.now());
+  const bookingBaseDate = useMemo(() => new Date(renderedAt), [renderedAt]);
+  const dateTooSoon = Boolean(date && date !== 'sin-fecha') && !isDateBookable(date, bookingLeadHours, bookingBaseDate);
+  const leadTimeNotice = bookingLeadHours > 0 ? buildLeadTimeMessage(bookingLeadHours) : '';
+
+  // Un error que viene del servidor (ej: fecha que cayó del plazo entre la excursión y el checkout)
+  // bloquea el pago y se muestra con link para volver a elegir fecha.
+  const blockedError = dateTooSoon ? initialError : null;
+  const selectedDialCode = getCountryDialCode(form.customerCountry);
+  const countryPaymentMethod = paymentMethodForCountry(form.customerCountry);
+
+  const handleNationalityChange = (countryName: string) => {
+    const nextPaymentMethod = paymentMethodForCountry(countryName);
+    setForm((prev) => ({
+      ...prev,
+      customerCountry: countryName,
+      customerPhone: applyPhonePrefix(prev.customerPhone, getCountryDialCode(countryName)),
+    }));
+    setPaymentMethod(nextPaymentMethod);
+  };
+
   const firstNameError = touched.firstName && form.customerFirstName.trim().length < NAME_MIN_LENGTH;
   const lastNameError = touched.lastName && form.customerLastName.trim().length < NAME_MIN_LENGTH;
   const emailError = touched.email && (!form.customerEmail.trim() || !EMAIL_REGEX.test(form.customerEmail.trim()));
-  const phoneError = touched.phone && form.customerPhone.trim().length < PHONE_MIN_LENGTH;
+  const countryError = touched.country && !form.customerCountry.trim();
+  const phoneError = touched.phone && countPhoneDigits(form.customerPhone) < PHONE_MIN_DIGITS;
   const documentError = touched.document && !form.customerDocument.trim();
   const birthDateError = touched.birthDate && !DATE_REGEX.test(form.customerBirthDate.trim());
-  const nationalityError = touched.nationality && !form.customerNationality.trim();
   const [passengersTouched, setPassengersTouched] = useState(false);
 
   const passengerErrors = useMemo(
@@ -232,7 +300,7 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
         lastName: traveler.lastName.trim().length < NAME_MIN_LENGTH,
         age: !Number.isFinite(Number(traveler.age)) || Number(traveler.age) < 0 || Number(traveler.age) > 120 || !traveler.age.trim(),
         birthDate: !DATE_REGEX.test(traveler.birthDate.trim()),
-        phone: traveler.phone.trim().length < PHONE_MIN_LENGTH,
+        phone: countPhoneDigits(traveler.phone) < PHONE_MIN_DIGITS,
         document: !traveler.document.trim(),
       })),
     [passengers]
@@ -252,39 +320,46 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
       firstName: true,
       lastName: true,
       email: true,
+      country: true,
       phone: true,
       document: true,
       birthDate: true,
-      nationality: true,
-      dietaryRestrictions: true,
     });
 
     if (form.customerFirstName.trim().length < NAME_MIN_LENGTH) {
-      setError('Ingresá tu nombre.');
+      setError(t('firstName'));
       return;
     }
     if (form.customerLastName.trim().length < NAME_MIN_LENGTH) {
-      setError('Ingresá tu apellido.');
+      setError(t('lastName'));
       return;
     }
     if (!EMAIL_REGEX.test(form.customerEmail.trim())) {
-      setError('Ingresá un email válido.');
+      setError(t('invalidEmail'));
       return;
     }
-    if (form.customerPhone.trim().length < PHONE_MIN_LENGTH) {
-      setError('Ingresá un WhatsApp válido.');
+    if (!form.customerCountry.trim() || !countryPaymentMethod) {
+      setError(t('selectCountryError'));
+      setTouched((prev) => ({ ...prev, country: true }));
+      return;
+    }
+    if (form.customerPhone.trim().length < PHONE_MIN_DIGITS || countPhoneDigits(form.customerPhone) < PHONE_MIN_DIGITS) {
+      setError(t('invalidPhone'));
+      return;
+    }
+    if (dateTooSoon) {
+      setError(
+        leadTimeNotice ||
+        'La fecha elegida no cumple la anticipación mínima de reserva. Volvé atrás y elegí otra fecha.'
+      );
       return;
     }
     if (!form.customerDocument.trim()) {
-      setError('Ingresá tu DNI o pasaporte.');
+      setError(t('requiredField'));
       return;
     }
     if (!DATE_REGEX.test(form.customerBirthDate.trim())) {
-      setError('Ingresá tu fecha de nacimiento.');
-      return;
-    }
-    if (!form.customerNationality.trim()) {
-      setError('Seleccioná tu nacionalidad.');
+      setError(t('invalidDate'));
       return;
     }
     if (!passengersValid) {
@@ -294,16 +369,24 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
     }
 
     setError(null);
+    setPaymentMethod(countryPaymentMethod);
     setStep('payment');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const createMercadoPagoPreference = async () => {
+  const createPaymentPreference = async (method: PaymentMethod = paymentMethod ?? countryPaymentMethod ?? 'mercadopago') => {
+    if (blockedError) {
+      setError(blockedError);
+      return;
+    }
     setError(null);
     setIsLoading(true);
 
     try {
       const baseUrl = getSiteUrl();
+      const addonIds = Array.isArray(selectedAddons)
+        ? selectedAddons.map((addon) => String((addon as any)?.id ?? '').trim()).filter(Boolean)
+        : [];
       const passengerDetails = passengers.map((traveler) => {
         const age = Math.max(0, Math.min(120, Number(traveler.age) || 0));
         return {
@@ -325,30 +408,33 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
           date,
           people: travelerCount,
           ...(pax ? { peopleBreakdown: pax } : {}),
+          ...(addonIds.length ? { addonIds } : {}),
           ...(passengerDetails.length ? { passengerDetails } : {}),
           customerEmail: form.customerEmail.trim(),
           customerName: `${form.customerFirstName.trim()} ${form.customerLastName.trim()}`.trim(),
+          customerCountry: form.customerCountry.trim() || undefined,
           customerPhone: form.customerPhone.trim() || undefined,
           customerDocument: form.customerDocument.trim() || undefined,
           customerBirthDate: form.customerBirthDate.trim() || undefined,
-          customerNationality: form.customerNationality.trim() || undefined,
-          customerDietaryRestrictions: form.customerDietaryRestrictions.trim() || undefined,
+          ...(form.customerAge.trim() ? { customerAge: Number(form.customerAge) } : {}),
+          customerHotel: form.customerHotel.trim() || undefined,
           customerComments: form.customerComments.trim() || undefined,
           successUrl: `${baseUrl}/checkout/success?slug=${encodeURIComponent(experience.slug)}&date=${encodeURIComponent(date)}&people=${encodeURIComponent(String(travelerCount))}`,
           failureUrl: `${baseUrl}/checkout/cancel?slug=${encodeURIComponent(experience.slug)}`,
           pendingUrl: `${baseUrl}/checkout/success?slug=${encodeURIComponent(experience.slug)}&date=${encodeURIComponent(date)}&people=${encodeURIComponent(String(travelerCount))}`,
           ...(referralCode ? { referralCode } : {}),
+          paymentMethod: method,
         }),
       });
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload?.error || 'No se pudo iniciar el pago.');
+        throw new Error(payload?.error || t('paymentStartError'));
       }
 
       const data = (await response.json()) as { url?: string };
       if (!data.url) {
-        throw new Error('No se recibió la URL de pago.');
+        throw new Error(t('paymentUrlError'));
       }
 
       window.location.href = data.url;
@@ -365,7 +451,7 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
         <div className="mb-6">
           <Link
             href={`/experiencia/${experience.slug}`}
-            className="inline-flex items-center gap-1.5 rounded-full border border-[#F4D1D4] bg-white px-4 py-2 text-sm font-extrabold text-[#112B49] shadow-[0_10px_24px_rgba(17,43,73,0.08)] transition-all hover:-translate-y-0.5 hover:border-[#E30613] hover:bg-[#FFF1F1] hover:text-[#E30613] hover:shadow-[0_14px_30px_rgba(17,43,73,0.12)]"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#D8E7F5] bg-white px-4 py-2 text-sm font-extrabold text-[#112B49] shadow-[0_10px_24px_rgba(17,43,73,0.08)] transition-all hover:-translate-y-0.5 hover:border-[#B7D8EF] hover:bg-[#F8FCFF] hover:text-[#0B7FA5] hover:shadow-[0_14px_30px_rgba(17,43,73,0.12)]"
           >
             <ArrowLeft className="h-4 w-4" />
             Volver a la excursión
@@ -382,9 +468,8 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                   return (
                     <div key={item.id} className="flex items-center gap-3">
                       <div
-                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] ${
-                          isActive ? 'bg-[#E30613] text-white' : 'bg-[#EEF6FF] text-[#5A7898]'
-                        }`}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] ${isActive ? 'bg-[#E30613] text-white' : 'bg-[#EEF6FF] text-[#5A7898]'
+                          }`}
                       >
                         <Icon className="h-3.5 w-3.5" />
                         {item.title}
@@ -406,17 +491,31 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                 >
                   <Card className="rounded-3xl border-[#D4E6F7] shadow-[0_16px_36px_rgba(15,66,116,0.08)]">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-2xl font-black tracking-[-0.02em] text-[#0B2240]">Completá tus datos</CardTitle>
-                      <p className="text-sm text-[#5A7898]">Reservás directo y seguís al pago, sin pasar por carrito.</p>
+                      <CardTitle className="text-2xl font-black tracking-[-0.02em] text-[#0B2240]">{t('completeYourData')}</CardTitle>
+                      <p className="text-sm text-[#5A7898]">{t('reserveDirectly')}</p>
                     </CardHeader>
                     <CardContent>
                       <form onSubmit={handleSubmitForm} className="space-y-5" noValidate>
+                        {blockedError ? (
+                          <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                            <Calendar className="mt-0.5 h-4 w-4 shrink-0" />
+                            <span>
+                              {blockedError}{' '}
+                              <Link
+                                href={`/experiencia/${experience.slug}`}
+                                className="underline underline-offset-2 hover:text-red-800"
+                              >
+                                Volver a la excursión
+                              </Link>
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="text-sm font-extrabold uppercase tracking-[0.1em] text-[#0B2240]">
                           Pasajero 1
                         </div>
-                        <div className="grid gap-4 md:grid-cols-2">
+                        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
                           <div className="space-y-1.5">
-                            <Label htmlFor="customerFirstName">Nombre *</Label>
+                            <Label htmlFor="customerFirstName">{t('firstName')} *</Label>
                             <Input
                               id="customerFirstName"
                               value={form.customerFirstName}
@@ -424,10 +523,10 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                               onBlur={() => setTouched((prev) => ({ ...prev, firstName: true }))}
                               placeholder="Ej: Juan"
                             />
-                            {firstNameError ? <p className="text-xs font-semibold text-red-500">Minimo 2 caracteres.</p> : null}
+                            {firstNameError ? <p className="text-xs font-semibold text-red-500">{t('minimumTwoCharacters')}</p> : null}
                           </div>
                           <div className="space-y-1.5">
-                            <Label htmlFor="customerLastName">Apellido *</Label>
+                            <Label htmlFor="customerLastName">{t('lastName')} *</Label>
                             <Input
                               id="customerLastName"
                               value={form.customerLastName}
@@ -435,10 +534,10 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                               onBlur={() => setTouched((prev) => ({ ...prev, lastName: true }))}
                               placeholder="Ej: Garcia"
                             />
-                            {lastNameError ? <p className="text-xs font-semibold text-red-500">Minimo 2 caracteres.</p> : null}
+                            {lastNameError ? <p className="text-xs font-semibold text-red-500">{t('minimumTwoCharacters')}</p> : null}
                           </div>
-                          <div className="space-y-1.5 md:col-span-2">
-                            <Label htmlFor="customerEmail">Email *</Label>
+                          <div className="col-span-2 space-y-1.5 md:col-span-1">
+                            <Label htmlFor="customerEmail">{t('email')} *</Label>
                             <div className="relative">
                               <Input
                                 id="customerEmail"
@@ -451,73 +550,74 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                               />
                               <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7C95AE]" />
                             </div>
-                            {emailError ? <p className="text-xs font-semibold text-red-500">Ingresa un email valido.</p> : null}
+                            {emailError ? <p className="text-xs font-semibold text-red-500">{t('invalidEmailInline')}</p> : null}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="customerNationality">{t('country')} *</Label>
+                            <NationalitySelect
+                              id="customerNationality"
+                              value={form.customerCountry}
+                              onChange={handleNationalityChange}
+                              placeholder={t('selectCountry')}
+                            />
+                            {countryError ? <p className="text-xs font-semibold text-red-500">{t('selectCountryError')}</p> : null}
                           </div>
                           <div className="space-y-1.5">
-                            <Label htmlFor="customerPhone">WhatsApp *</Label>
-                            <Input
+                            <Label htmlFor="customerPhone">{t('whatsapp')} *</Label>
+                            <PhoneWithPrefixInput
                               id="customerPhone"
                               value={form.customerPhone}
-                              onChange={(event) => setForm((prev) => ({ ...prev, customerPhone: event.target.value }))}
+                              dialCode={selectedDialCode}
+                              onValueChange={(next) => setForm((prev) => ({ ...prev, customerPhone: next }))}
                               onBlur={() => setTouched((prev) => ({ ...prev, phone: true }))}
-                              placeholder="+54 11 ..."
+                              placeholder="11 ..."
                             />
-                            {phoneError ? <p className="text-xs font-semibold text-red-500">Ingresa un WhatsApp valido.</p> : null}
                           </div>
                           <div className="space-y-1.5">
-                            <Label htmlFor="customerDocument">DNI / Pasaporte *</Label>
+                            <Label htmlFor="customerDocument">{t('document')} *</Label>
                             <Input
                               id="customerDocument"
                               value={form.customerDocument}
                               onChange={(event) => setForm((prev) => ({ ...prev, customerDocument: event.target.value }))}
                               onBlur={() => setTouched((prev) => ({ ...prev, document: true }))}
-                              placeholder="Numero de documento"
+                              placeholder={t('documentPlaceholder')}
                             />
-                            {documentError ? <p className="text-xs font-semibold text-red-500">Este dato es obligatorio.</p> : null}
+                            {documentError ? <p className="text-xs font-semibold text-red-500">{t('requiredField')}</p> : null}
                           </div>
-                          <div className="space-y-1.5 md:col-span-2">
-                            <Label htmlFor="customerBirthDate">Fecha de nacimiento *</Label>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="customerBirthDate">{t('birthDate')} *</Label>
                             <ArgentineDateInput
                               id="customerBirthDate"
                               value={form.customerBirthDate}
                               onChange={(value) => setForm((prev) => ({ ...prev, customerBirthDate: value }))}
                               onBlur={() => setTouched((prev) => ({ ...prev, birthDate: true }))}
                             />
-                            {birthDateError ? <p className="text-xs font-semibold text-red-500">Ingresa una fecha valida.</p> : null}
+                            {birthDateError ? <p className="text-xs font-semibold text-red-500">{t('invalidDate')}</p> : null}
                           </div>
-                          <div className="space-y-1.5 md:col-span-2">
-                            <Label htmlFor="customerNationality">Nacionalidad *</Label>
-                            <Select
-                              name="customerNationality"
-                              value={form.customerNationality}
-                              onValueChange={(value) => setForm((prev) => ({ ...prev, customerNationality: value }))}
-                            >
-                              <SelectTrigger id="customerNationality" className="w-full">
-                                <SelectValue placeholder="Seleccioná tu país" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  <SelectLabel>Países</SelectLabel>
-                                  {getSpanishCountries().map((country) => (
-                                    <SelectItem key={country.code} value={country.code}>
-                                      {country.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                            {nationalityError ? <p className="text-xs font-semibold text-red-500">Seleccioná tu nacionalidad.</p> : null}
+                          <div className="space-y-1.5">
+                            <Label htmlFor="customerAge">{t('age')}</Label>
+                            <Input
+                              id="customerAge"
+                              type="number"
+                              min={0}
+                              max={120}
+                              inputMode="numeric"
+                              value={form.customerAge}
+                              onChange={(event) => setForm((prev) => ({ ...prev, customerAge: event.target.value }))}
+                              placeholder="Ej: 30"
+                            />
                           </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <Label htmlFor="customerDietaryRestrictions">Restricción de comidas</Label>
-                          <Textarea
-                            id="customerDietaryRestrictions"
-                            value={form.customerDietaryRestrictions}
-                            onChange={(event) => setForm((prev) => ({ ...prev, customerDietaryRestrictions: event.target.value }))}
-                            placeholder="Alergias, intolerancias o preferencias alimentarias (opcional)"
-                          />
+                          <div className="space-y-1.5">
+                            <Label htmlFor="customerHotel">{t('hotel')}</Label>
+                            <Input
+                              id="customerHotel"
+                              value={form.customerHotel}
+                              onChange={(event) => setForm((prev) => ({ ...prev, customerHotel: event.target.value }))}
+                              placeholder={t('hotelPlaceholder')}
+                            />
+                          </div>
                         </div>
 
                         {passengers.length > 0 ? (
@@ -528,31 +628,31 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                               return (
                                 <div key={index} className="space-y-3 rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] p-4">
                                   <div className="text-sm font-extrabold uppercase tracking-[0.1em] text-[#0B2240]">
-                                    Pasajero {index + 2}
+                                    {t('passenger', { number: index + 2 })}
                                   </div>
-                                  <div className="grid gap-4 md:grid-cols-2">
+                                  <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
-                                      <Label htmlFor={`passenger-${index}-firstName`}>Nombre *</Label>
+                                      <Label htmlFor={`passenger-${index}-firstName`}>{t('name')} *</Label>
                                       <Input
                                         id={`passenger-${index}-firstName`}
                                         value={traveler.firstName}
                                         onChange={(event) => updatePassenger(index, { firstName: event.target.value })}
                                         placeholder="Ej: Juan"
                                       />
-                                      {showErrors && errors?.firstName ? <p className="text-xs font-semibold text-red-500">Minimo 2 caracteres.</p> : null}
+                                      {showErrors && errors?.firstName ? <p className="text-xs font-semibold text-red-500">{t('minimumCharacters')}</p> : null}
                                     </div>
                                     <div className="space-y-1.5">
-                                      <Label htmlFor={`passenger-${index}-lastName`}>Apellido *</Label>
+                                      <Label htmlFor={`passenger-${index}-lastName`}>{t('lastName')} *</Label>
                                       <Input
                                         id={`passenger-${index}-lastName`}
                                         value={traveler.lastName}
                                         onChange={(event) => updatePassenger(index, { lastName: event.target.value })}
                                         placeholder="Ej: Garcia"
                                       />
-                                      {showErrors && errors?.lastName ? <p className="text-xs font-semibold text-red-500">Minimo 2 caracteres.</p> : null}
+                                      {showErrors && errors?.lastName ? <p className="text-xs font-semibold text-red-500">{t('minimumCharacters')}</p> : null}
                                     </div>
                                     <div className="space-y-1.5">
-                                      <Label htmlFor={`passenger-${index}-age`}>Edad *</Label>
+                                      <Label htmlFor={`passenger-${index}-age`}>{t('age')} *</Label>
                                       <Input
                                         id={`passenger-${index}-age`}
                                         type="number"
@@ -562,36 +662,36 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                                         onChange={(event) => updatePassenger(index, { age: event.target.value })}
                                         placeholder="Ej: 30"
                                       />
-                                      {showErrors && errors?.age ? <p className="text-xs font-semibold text-red-500">Ingresa una edad valida.</p> : null}
+                                      {showErrors && errors?.age ? <p className="text-xs font-semibold text-red-500">{t('invalidAge')}</p> : null}
                                     </div>
                                     <div className="space-y-1.5">
-                                      <Label htmlFor={`passenger-${index}-birthDate`}>Fecha de nacimiento *</Label>
+                                      <Label htmlFor={`passenger-${index}-birthDate`}>{t('birthDate')} *</Label>
                                       <ArgentineDateInput
                                         id={`passenger-${index}-birthDate`}
                                         value={traveler.birthDate}
                                         onChange={(value) => updatePassenger(index, { birthDate: value })}
                                       />
-                                      {showErrors && errors?.birthDate ? <p className="text-xs font-semibold text-red-500">Ingresa una fecha valida.</p> : null}
+                                      {showErrors && errors?.birthDate ? <p className="text-xs font-semibold text-red-500">{t('invalidDate')}</p> : null}
                                     </div>
                                     <div className="space-y-1.5">
-                                      <Label htmlFor={`passenger-${index}-phone`}>Telefono *</Label>
+                                      <Label htmlFor={`passenger-${index}-phone`}>{t('whatsapp')} *</Label>
                                       <Input
                                         id={`passenger-${index}-phone`}
                                         value={traveler.phone}
                                         onChange={(event) => updatePassenger(index, { phone: event.target.value })}
                                         placeholder="+54 11 ..."
                                       />
-                                      {showErrors && errors?.phone ? <p className="text-xs font-semibold text-red-500">Ingresa un telefono valido.</p> : null}
+                                      {showErrors && errors?.phone ? <p className="text-xs font-semibold text-red-500">{t('invalidPhoneInline')}</p> : null}
                                     </div>
                                     <div className="space-y-1.5">
-                                      <Label htmlFor={`passenger-${index}-document`}>DNI / Pasaporte *</Label>
+                                      <Label htmlFor={`passenger-${index}-document`}>{t('document')} *</Label>
                                       <Input
                                         id={`passenger-${index}-document`}
                                         value={traveler.document}
                                         onChange={(event) => updatePassenger(index, { document: event.target.value })}
-                                        placeholder="Numero de documento"
+                                        placeholder={t('documentPlaceholder')}
                                       />
-                                      {showErrors && errors?.document ? <p className="text-xs font-semibold text-red-500">Este dato es obligatorio.</p> : null}
+                                      {showErrors && errors?.document ? <p className="text-xs font-semibold text-red-500">{t('requiredField')}</p> : null}
                                     </div>
                                   </div>
                                 </div>
@@ -601,12 +701,12 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                         ) : null}
 
                         <div className="space-y-1.5">
-                          <Label htmlFor="customerComments">Comentarios</Label>
+                          <Label htmlFor="customerComments">{t('comments')}</Label>
                           <Textarea
                             id="customerComments"
                             value={form.customerComments}
                             onChange={(event) => setForm((prev) => ({ ...prev, customerComments: event.target.value }))}
-                            placeholder="Indicaciones importantes para tu reserva"
+                            placeholder={t('commentsPlaceholder')}
                           />
                         </div>
 
@@ -616,8 +716,12 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                           </div>
                         ) : null}
 
-                        <Button type="submit" className="h-12 w-full rounded-2xl bg-[#E30613] text-base font-bold hover:bg-[#C70511]">
-                          Continuar al pago
+                        <Button
+                          type="submit"
+                          disabled={Boolean(blockedError)}
+                          className="h-12 w-full rounded-2xl bg-[#E30613] text-base font-bold hover:bg-[#22A9B0] disabled:cursor-not-allowed disabled:opacity-60 text-white"
+                        >
+                          {t('continueToPayment')}
                           <ChevronRight className="ml-1 h-4 w-4" />
                         </Button>
                       </form>
@@ -635,36 +739,38 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
                 >
                   <Card className="rounded-3xl border-[#D4E6F7] shadow-[0_16px_36px_rgba(15,66,116,0.08)]">
                     <CardHeader className="pb-3 text-center">
-                      <CardTitle className="text-2xl font-black tracking-[-0.02em] text-[#0B2240]">Finalizar reserva</CardTitle>
-                      <p className="text-sm text-[#5A7898]">Te redirigimos a Mercado Pago para completar el pago.</p>
+                    <CardTitle className="text-2xl font-black tracking-[-0.02em] text-[#0B2240]">{t('finalizeReservation')}</CardTitle>
+                      <p className="text-sm text-[#5A7898]">{t('redirectingToPayment')}</p>
                     </CardHeader>
                     <CardContent className="space-y-5">
                       <button
                         type="button"
-                        onClick={() => void createMercadoPagoPreference()}
-                        disabled={isLoading}
-                        className="flex w-full items-center justify-between rounded-3xl border border-[#D7E8F7] bg-white px-5 py-5 text-left transition hover:shadow-[0_12px_28px_rgba(15,66,116,0.1)] disabled:opacity-60"
+                        onClick={() => void createPaymentPreference()}
+                        disabled={isLoading || Boolean(blockedError)}
+                        className="flex cursor-pointer w-full items-center justify-between rounded-2xl border border-[#D7E8F7] bg-white px-4 py-3.5 text-left transition hover:shadow-[0_12px_28px_rgba(15,66,116,0.1)] disabled:opacity-60"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E8F4FF]">
-                            {isLoading ? <Loader2 className="h-6 w-6 animate-spin text-[#009EE3]" /> : <img src="/images/mercado-pago-logo.png" alt="Mercado Pago" className="h-6" />}
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-16 items-center justify-center rounded-xl bg-[#E8F4FF] p-1.5">
+                            {isLoading ? (
+                              <Loader2 className="h-5 w-5 animate-spin text-[#009EE3]" />
+                            ) : (
+                              <Image
+                                src="/images/mercado-pago-logo.png"
+                                alt="Mercado Pago"
+                                width={56}
+                                height={28}
+                                className="h-full w-full object-contain"
+                              />
+                            )}
                           </div>
                           <div>
-                            <div className="text-base font-bold text-[#0B2240]">Mercado Pago</div>
-                            <div className="text-sm text-[#5A7898]">Tarjetas, debito o dinero en cuenta</div>
+                            <div className="text-sm font-semibold text-[#0B2240]">{t('continueToPayment')} · {t('mercadoPago')}</div>
                           </div>
                         </div>
-                        <div className="rounded-full bg-[#009EE3] px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] text-white">
-                          Pagar
+                        <div className="rounded-full bg-[#009EE3] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white">
+                          {t('pay')}
                         </div>
                       </button>
-
-                      <div className="rounded-2xl border border-[#DDEAF8] bg-[#F6FBFF] px-4 py-4 text-sm text-[#486887]">
-                        <div className="flex items-start gap-3">
-                          <ShieldCheck className="mt-0.5 h-4 w-4 text-[#009EE3]" />
-                          <p>La operacion se realiza fuera del sitio y queda protegida por Mercado Pago.</p>
-                        </div>
-                      </div>
 
                       {error ? (
                         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
@@ -674,10 +780,11 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
 
                       <button
                         type="button"
-                        className="w-full text-center text-sm font-semibold text-[#5A7898] transition hover:text-[#E30613]"
+                        className="w-full cursor-pointer text-center text-sm font-semibold text-[#5A7898] transition hover:text-[#E30613]"
                         onClick={() => setStep('form')}
                       >
-                        Volver
+                        <ArrowLeft className="h-4 w-4 inline-block mr-1" />
+                        {t('back')}
                       </button>
                     </CardContent>
                   </Card>
@@ -687,67 +794,106 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
           </div>
 
           <aside className="xl:sticky xl:top-8">
-            <div className="rounded-3xl border border-[#D4E6F7] bg-white p-5 shadow-[0_16px_36px_rgba(15,66,116,0.08)]">
-              <div className="text-xs font-bold uppercase tracking-[0.14em] text-[#7C95AE]">Tu reserva</div>
-              <h2 className="mt-2 text-2xl font-black tracking-[-0.02em] text-[#0B2240]">{experience.title}</h2>
+            <div className="rounded-3xl border border-[#D4E6F7] bg-white p-6 shadow-[0_16px_36px_rgba(15,66,116,0.08)]">
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#7C95AE]">{t('reservationSummary')}</div>
+              <h2 className="mt-2 text-xl font-black leading-snug tracking-[-0.02em] text-[#0B2240]">{experience.title}</h2>
 
-              <div className="mt-5 space-y-3">
-                <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Salida</div>
-                  <div className="mt-1 flex items-center gap-2 text-sm font-bold text-[#12325D]">
-                    <Calendar className="h-4 w-4 text-[#E30613]" />
-                    {dateLabel}
+              <div className="mt-6 space-y-5">
+                <div>
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7C95AE]">
+                    <Calendar className="h-3.5 w-3.5 text-[#E30613]" />
+                    Salida
                   </div>
+                  <div className="mt-1.5 text-sm font-bold capitalize text-[#12325D]">{dateLabel}</div>
                 </div>
-                <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Modalidad</div>
-                  <div className="mt-1 text-sm font-bold text-[#12325D]">Reserva directa</div>
-                </div>
-                <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Personas</div>
-                  <div className="mt-1 text-sm font-bold text-[#12325D]">{travelerCount}</div>
+
+                <div>
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7C95AE]">
+                    <Users className="h-3.5 w-3.5 text-[#E30613]" />
+                    Pasajeros
+                  </div>
                   {paxSummary.length > 0 ? (
-                    <div className="mt-1 text-xs text-[#5A7898]">
-                      {paxSummary.map((item) => `${item.value} ${item.label}`).join(' · ')}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {paxSummary.map((item) => {
+                        return (
+                          <span
+                            key={item.key}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[#F8FBFF] px-2.5 py-1 text-xs font-semibold text-[#12325D] ring-1 ring-[#E3EDF7]"
+                          >
+                            {item.value} {item.label.toLowerCase()}
+                          </span>
+                        );
+                      })}
                     </div>
-                  ) : null}
-                  <div className="mt-2 space-y-0.5 text-xs text-[#5A7898]">
-                    {Array.from({ length: travelerCount }).map((_, index) => (
-                      <div key={index}>
-                        Pasajero {index + 1}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Reserva</div>
-                  <div className="mt-1 text-sm font-bold text-[#12325D]">Titular + pago directo</div>
-                </div>
-                <div className="rounded-2xl border border-[#E3EDF7] bg-[#F8FBFF] px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Total</div>
-                  <div className="mt-1 text-2xl font-black tracking-[-0.02em] text-[#0B2240]">
-                    {formatAmount(total / 100, currency)}
-                  </div>
+                  ) : (
+                    <div className="mt-1.5 text-sm font-bold text-[#12325D]">
+                      {travelerCount} {travelerCount === 1 ? 'pasajero' : 'pasajeros'}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {checkoutExtras.items.length > 0 ? (
-                <div className="mt-4 rounded-2xl border border-[#E3EDF7] bg-white px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#7C95AE]">Incluye</div>
-                  <div className="mt-2 space-y-2">
-                    {checkoutExtras.items.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between gap-3 text-sm text-[#486887]">
-                        <span>{item.label}</span>
-                        <span className="font-bold text-[#12325D]">{formatAmount(item.amount / 100, currency)}</span>
-                      </div>
-                    ))}
-                  </div>
+              <div className="mt-6 border-t border-[#E3EDF7] pt-5">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7C95AE]">
+                  <ReceiptText className="h-3.5 w-3.5 text-[#E30613]" />
+                  Resumen
                 </div>
-              ) : null}
 
-              <div className="mt-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[#7C95AE]">
-                <Lock className="h-3.5 w-3.5" />
-                Transaccion segura
+                {showPriceBreakdown ? (
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-[#486887]">
+                        Subtotal · {travelerCount} {travelerCount === 1 ? 'pasajero' : 'pasajeros'}
+                      </span>
+                      <span className="font-semibold tabular-nums text-[#12325D]">
+                        {formatMoney(baseSubtotalAmount / 100, currency)}
+                      </span>
+                    </div>
+
+                    {checkoutExtras.items.length > 0 ? (
+                      <div className="space-y-2.5">
+                        {checkoutExtras.items.map((item) => (
+                          <div key={item.id || item.label} className="flex items-center justify-between gap-3 text-sm">
+                            <span className="flex min-w-0 items-center gap-1.5 text-[#486887]">
+                              <TicketPlus className="h-3.5 w-3.5 shrink-0 text-[#F5B301]" />
+                              <span className="truncate">{item.label}</span>
+                            </span>
+                            <span className="shrink-0 font-semibold tabular-nums text-[#12325D]">
+                              {formatMoney((item.amount / 100) * travelerCount, currency)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="my-4 h-px bg-[#E3EDF7]" />
+
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-sm font-bold text-[#0B2240]">Total</span>
+                      <div className="text-right">
+                        <div className="flex items-baseline justify-end gap-1.5">
+                          <span className="text-[26px] font-black tabular-nums tracking-[-0.02em] text-[#0B2240]">
+                            {formatMoney(total / 100, currency)}
+                          </span>
+                          <span className="text-xs font-bold uppercase text-[#7C95AE]">{currency}</span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] font-medium text-[#7C95AE]">{t('finalPrice')}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-bold text-[#0B2240]">Total</span>
+                    <span className="text-[26px] font-black tabular-nums tracking-[-0.02em] text-[#0B2240]">
+                      {formatMoney(total / 100, currency)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 flex items-center gap-2 rounded-2xl bg-[#F8FBFF] px-3.5 py-3 ring-1 ring-[#E3EDF7] justify-center">
+                <Lock className="h-3.5 w-3.5 shrink-0 text-[#E30613]" />
+                        <span className="text-[11px] font-semibold text-[#486887]">{t('protectedPayment')}</span>
               </div>
             </div>
           </aside>

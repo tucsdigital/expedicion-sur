@@ -8,8 +8,10 @@ import { addMinutes, computeBaseCapacity, getAvailableForPackageDate, getHeldPeo
 import { orderExternalReference } from '@/lib/orders';
 import { getSeatDepartureId, seatIdsFromLabels } from '@/lib/seats/server';
 import type { SeatLayoutTemplate } from '@/types';
-import { computeReservationPricing, getAdministrativeFeeExtraSelection, resolveDepartureConfig } from '@/lib/packages/resolve-departure';
+import { computeReservationPricing, getPackageAddonExtraSelections, resolveDepartureConfig } from '@/lib/packages/resolve-departure';
 import { getPeopleBreakdownTotal, normalizePeopleBreakdown, normalizePeopleCategories } from '@/lib/packages/people-categories';
+import { formatIsoDateEs, getFirstBookableDateIso, getMinLeadHours, isDateBookable } from '@/lib/packages/booking-rules';
+import { getCountryByName } from '@/lib/countries';
 
 export const runtime = 'nodejs';
 
@@ -30,14 +32,15 @@ const payloadSchema = z.object({
   date: z.string().optional(),
   people: z.number().int().min(1).max(50).optional(),
   peopleBreakdown: z.record(z.string(), z.number().int().min(0).max(50)).optional(),
+  addonIds: z.array(z.string().min(1).max(80)).max(20).optional(),
   customerEmail: z.string().email().optional(),
   customerName: z.string().max(200).optional(),
   customerPhone: z.string().max(50).optional(),
+  customerCountry: z.string().max(60).optional(),
   customerDocument: z.string().max(50).optional(),
   customerBirthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  customerNationality: z.string().max(100).optional(),
-  customerDietaryRestrictions: z.string().max(500).optional(),
-  roomType: z.enum(['matrimonial', 'twin', 'full-day']).optional(),
+  customerAge: z.number().int().min(0).max(120).optional(),
+  customerHotel: z.string().max(160).optional(),
   customerComments: z.string().max(500).optional(),
   passengerDetails: z.array(travelerDetailsSchema).max(50).optional(),
   successUrl: z.string().url().optional(),
@@ -212,19 +215,28 @@ function withQueryParams(url: string, params: Record<string, string | number | n
   }
 }
 
+/**
+ * Regla de anticipación mínima (ej: 48 hs): devuelve el mensaje de error
+ * cuando la fecha elegida no cumple el plazo configurado para el paquete.
+ */
+function leadTimeError(paquete: { bookingConfig?: { minLeadHours?: number } | null }, date: string): string | null {
+  if (!date || date === 'sin-fecha') return null;
+  const minLeadHours = getMinLeadHours(paquete.bookingConfig);
+  if (isDateBookable(date, minLeadHours)) return null;
+  const firstBookableDate = formatIsoDateEs(getFirstBookableDateIso(minLeadHours));
+  return `Las reservas se realizan con un mínimo de ${minLeadHours} hs de anticipación. Elegí una fecha a partir del ${firstBookableDate}.`;
+}
+
 export async function POST(request: Request) {
   if (!sameOrigin(request)) {
     return NextResponse.json({ error: 'Origen no autorizado.' }, { status: 403 });
   }
 
+  const payload = await request.json().catch(() => null);
   if (!mercadopagoEnabled) {
-    return NextResponse.json(
-      { error: 'Falta configurar MERCADO_PAGO_ACCESS_TOKEN.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Falta configurar MERCADO_PAGO_ACCESS_TOKEN.' }, { status: 500 });
   }
 
-  const payload = await request.json().catch(() => null);
   const parsed = payloadSchema.safeParse(payload);
 
   if (!parsed.success) {
@@ -240,17 +252,20 @@ export async function POST(request: Request) {
     customerEmail,
     customerName,
     customerPhone,
+    customerCountry,
     customerDocument,
     customerBirthDate,
-    customerNationality,
-    customerDietaryRestrictions,
-    roomType,
+    customerAge,
+    customerHotel,
     customerComments,
     successUrl: bodySuccessUrl,
     failureUrl: bodyFailureUrl,
     pendingUrl: bodyPendingUrl,
   } = parsed.data;
   const referralCode = parsed.data.referralCode?.trim() || undefined;
+  if (!cartId && !getCountryByName(customerCountry ?? '')) {
+    return NextResponse.json({ error: 'Seleccion� un pa�s v�lido.' }, { status: 400 });
+  }
   const passengerDetails = Array.isArray(parsed.data.passengerDetails)
     ? parsed.data.passengerDetails.map((item) => ({
         firstName: String(item.firstName ?? '').trim(),
@@ -315,16 +330,14 @@ export async function POST(request: Request) {
               amountTotal: Number(intent.amountTotal ?? 0),
               items: Array.isArray(intent.items) ? intent.items : [],
               referral: intent.referral ?? cart.referral ?? null,
-               customer: {
-                 email: intent.customerEmail ?? null,
-                 name: intent.customerName ?? null,
-                 phone: intent.customerPhone ?? null,
-                 document: intent.customerDocument ?? null,
-                 birthDate: intent.customerBirthDate ?? null,
-                 nationality: intent.customerNationality ?? null,
-                 dietaryRestrictions: intent.customerDietaryRestrictions ?? null,
-                 comments: intent.customerComments ?? null,
-               },
+              customer: {
+                email: intent.customerEmail ?? null,
+                name: intent.customerName ?? null,
+                phone: intent.customerPhone ?? null,
+                document: intent.customerDocument ?? null,
+                birthDate: intent.customerBirthDate ?? null,
+                comments: intent.customerComments ?? null,
+              },
               passengerDetails: Array.isArray(intent.passengerDetails) ? intent.passengerDetails : null,
               expiresAt: cart.expiresAt ?? now,
               payment: {
@@ -404,6 +417,10 @@ export async function POST(request: Request) {
         if (!departureConfig.enabled) {
           return NextResponse.json({ error: 'Hay fechas no habilitadas en el carrito. Volvé al carrito para actualizar.' }, { status: 400 });
         }
+        const leadError = leadTimeError(pkg, date);
+        if (leadError) {
+          return NextResponse.json({ error: leadError }, { status: 400 });
+        }
       }
 
       const holdId = String(it.holdId || '');
@@ -446,7 +463,6 @@ export async function POST(request: Request) {
         peopleMinors,
         depositPercentAdults,
         depositPercentMinors,
-        roomType: typeof (it as any).roomType === 'string' ? String((it as any).roomType) : null,
         selectedExtras: Array.isArray((it as any).selectedExtras) ? (it as any).selectedExtras : null,
       });
       if (computedPricing.pricingMode === 'percent' && computedPricing.baseUnitAmount < 1) {
@@ -531,9 +547,6 @@ export async function POST(request: Request) {
         people,
         peopleAdults: computedPricing.peopleAdults,
         peopleMinors: computedPricing.peopleMinors,
-        pickupPoint: (it as any).pickupPoint ? String((it as any).pickupPoint) : null,
-        pickupPointTime: (it as any).pickupPointTime ? String((it as any).pickupPointTime) : null,
-        roomType: typeof (it as any).roomType === 'string' ? String((it as any).roomType) : null,
         selectedExtras: Array.isArray((it as any).selectedExtras) ? (it as any).selectedExtras : null,
         unitAmount,
         pricingMode: computedPricing.pricingMode,
@@ -617,10 +630,11 @@ export async function POST(request: Request) {
           email: customerEmail ?? null,
           name: customerName ?? null,
           phone: customerPhone ?? null,
+          country: customerCountry ?? null,
           document: customerDocument ?? null,
           birthDate: customerBirthDate ?? null,
-          nationality: customerNationality ?? null,
-          dietaryRestrictions: customerDietaryRestrictions ?? null,
+          age: customerAge ?? null,
+          hotel: customerHotel ?? null,
           comments: customerComments ?? null,
         },
         passengerDetails: passengerDetails ?? null,
@@ -645,10 +659,11 @@ export async function POST(request: Request) {
         customerEmail: customerEmail ?? null,
         customerName: customerName ?? null,
         customerPhone: customerPhone ?? null,
+        customerCountry: customerCountry ?? null,
         customerDocument: customerDocument ?? null,
         customerBirthDate: customerBirthDate ?? null,
-        customerNationality: customerNationality ?? null,
-        customerDietaryRestrictions: customerDietaryRestrictions ?? null,
+        customerAge: customerAge ?? null,
+        customerHotel: customerHotel ?? null,
         customerComments: customerComments ?? null,
         passengerDetails: passengerDetails ?? null,
         externalReference,
@@ -852,6 +867,10 @@ export async function POST(request: Request) {
     if (!departureConfig.enabled) {
       return NextResponse.json({ error: 'La fecha seleccionada no está habilitada.' }, { status: 400 });
     }
+    const leadError = leadTimeError(paquete, date);
+    if (leadError) {
+      return NextResponse.json({ error: leadError }, { status: 400 });
+    }
     const available = await getAvailableForPackageDate(paquete, date);
     if (people > available) {
       return NextResponse.json(
@@ -869,8 +888,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const directSelectedExtras = [getAdministrativeFeeExtraSelection(paquete)].filter(
-    (item): item is NonNullable<ReturnType<typeof getAdministrativeFeeExtraSelection>> => Boolean(item)
+  const directSelectedExtras = getPackageAddonExtraSelections(
+    paquete,
+    (parsed.data as any).addonIds
   );
   const peopleAdults =
     breakdown && typeof (breakdown as any).adults === 'number' ? Math.max(0, Math.floor((breakdown as any).adults)) : null;
@@ -880,7 +900,6 @@ export async function POST(request: Request) {
     people,
     peopleAdults,
     peopleMinors,
-    roomType: roomType ?? null,
     selectedExtras: directSelectedExtras,
   });
   const unitPrice = computedPricing.unitAmount;
@@ -894,6 +913,12 @@ export async function POST(request: Request) {
   }
 
   const baseUrl = getRequestBaseUrl(request);
+
+  // Intent + URLs de retorno: el intentId se crea acá pero las back_urls
+  // necesitan incluirlo para que /checkout/success pueda verificar el pago
+  // directo (GET verify-direct) aunque el webhook tarde o no llegue.
+  const intentRef = doc(collection(db, 'checkoutIntents'));
+  const intentId = intentRef.id;
   const sessionAmount = computedPricing.subtotalAmount;
 
   // Construir URLs de retorno
@@ -903,6 +928,7 @@ export async function POST(request: Request) {
       slug: paquete.slug,
       date,
       people,
+      intentId,
     }
   );
   const failureUrl = withQueryParams(
@@ -911,6 +937,7 @@ export async function POST(request: Request) {
       slug: paquete.slug,
       date,
       people,
+      intentId,
     }
   );
   const pendingUrl = withQueryParams(
@@ -919,13 +946,12 @@ export async function POST(request: Request) {
       slug: paquete.slug,
       date,
       people,
+      intentId,
     }
   );
 
   // Registrar intento de checkout + hold de cupo (si aplica)
   const now = Timestamp.now();
-  const intentRef = doc(collection(db, 'checkoutIntents'));
-  const intentId = intentRef.id;
   const externalReference = `pkg-${paquete.id}-${Date.now()}`;
   let holdId: string | null = null;
   let holdExpiresAt: Timestamp | null = null;
@@ -997,6 +1023,9 @@ export async function POST(request: Request) {
     holdExpiresAt,
     unitPrice,
     selectedExtras: directSelectedExtras.length ? directSelectedExtras : null,
+    addonIds: Array.isArray((parsed.data as any).addonIds)
+      ? (parsed.data as any).addonIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
+      : null,
     baseSubtotalAmount: computedPricing.baseSubtotalAmount,
     extrasTotalAmount: computedPricing.extrasTotalAmount,
     amountTotal: sessionAmount,
@@ -1004,9 +1033,11 @@ export async function POST(request: Request) {
     customerEmail: customerEmail ?? null,
     customerName: customerName ?? null,
     customerPhone: customerPhone ?? null,
+    customerCountry: customerCountry ?? null,
     customerDocument: customerDocument ?? null,
     customerBirthDate: customerBirthDate ?? null,
-    roomType: roomType ?? null,
+    customerAge: customerAge ?? null,
+    customerHotel: customerHotel ?? null,
     customerComments: customerComments ?? null,
     passengerDetails: passengerDetails ?? null,
     externalReference,

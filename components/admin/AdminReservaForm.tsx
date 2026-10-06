@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,31 +18,56 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, Trash2 } from 'lucide-react';
+import { Loader2, Receipt, Trash2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import type {
-  ReservationRoomType,
   ReservationStatus,
   ReservationTravelerDetails,
 } from '@/components/landing-reserva/types';
 import type { Vendor, ReferralLink } from '@/types/vendor';
 import type { DepartureSeat, Paquete, SeatLayoutTemplate } from '@/types';
-import { getVendors, getReferralLinksByVendor } from '@/lib/vendors';
+import { getVendors, getReferralLinksByVendor, getVendorByEmail } from '@/lib/vendors';
+import { getAllPaquetesAdmin } from '@/lib/paquetes';
+import { NationalitySelect } from '@/components/ui/nationality-select';
+import { PhoneWithPrefixInput } from '@/components/ui/phone-with-prefix-input';
+import { DEFAULT_COUNTRY_NAME, applyPhonePrefix, getCountryDialCode } from '@/lib/countries';
 import SeatMap from '@/components/seats/SeatMap';
 import {
   computeReservationPricing,
   getOperationalDepartureDates,
+  getPackageAddonOptions,
   getSeatLayoutExtraOptions,
   resolveDepartureConfig,
   resolveReservationExtraSelections,
 } from '@/lib/packages/resolve-departure';
+import { Checkbox } from '@/components/ui/checkbox';
 
 type Props = {
   paquetes: Paquete[];
+  hideReferral?: boolean;
+  hideVendorSelect?: boolean;
+  hideStatus?: boolean;
+  hideOverbook?: boolean;
+  apiEndpoint?: string;
+  successRedirect?: string;
+  initialData?: {
+    packageId?: string;
+    date?: string;
+    peopleAdults?: number;
+    peopleMinors?: number;
+    customerName?: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    customerDocument?: string;
+    customerBirthDate?: string;
+    customerComments?: string;
+    selectedExtraCodes?: string[];
+  };
 };
 
 type FormState = {
-  customerName: string;
+  customerFirstName: string;
+  customerLastName: string;
   customerEmail: string;
   customerPhone: string;
   customerCountry: string;
@@ -52,11 +76,14 @@ type FormState = {
   customerComments: string;
 };
 
+const NAME_MIN_LENGTH = 2;
+
 const DEFAULT_FORM_STATE: FormState = {
-  customerName: '',
+  customerFirstName: '',
+  customerLastName: '',
   customerEmail: '',
   customerPhone: '',
-  customerCountry: '',
+  customerCountry: DEFAULT_COUNTRY_NAME,
   customerDocument: '',
   customerBirthDate: '',
   customerComments: '',
@@ -82,12 +109,6 @@ const EMPTY_TRAVELER: TravelerForm = {
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
-const ROOM_TYPE_LABELS: Record<ReservationRoomType, string> = {
-  matrimonial: 'Matrimonial',
-  twin: 'Twin',
-  'full-day': 'Full day',
-};
-
 function formatAmountCents(amount: number, currency: string): string {
   const value = Math.max(0, Number(amount) || 0) / 100;
   if (currency === 'ARS') return `$${value.toLocaleString('es-AR')}`;
@@ -105,24 +126,45 @@ type AttachmentPreview = {
 };
 
 const statusOptions: { value: ReservationStatus; label: string }[] = [
-  { value: 'reserved', label: 'Reservada (pendiente de cobro)' },
+  { value: 'reserved', label: 'Reservada' },
   { value: 'pending', label: 'Pendiente' },
   { value: 'completed', label: 'Completada' },
 ];
 
-export default function AdminReservaForm({ paquetes }: Props) {
+export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSelect, hideStatus, hideOverbook, apiEndpoint, successRedirect, initialData }: Props) {
   const router = useRouter();
   const { user } = useAuth();
   const [selectedPackageId, setSelectedPackageId] = useState<string>(
-    paquetes[0]?.id ?? ''
+    initialData?.packageId ?? paquetes[0]?.id ?? ''
   );
-  const [date, setDate] = useState<string>('sin-fecha');
-  const [adults, setAdults] = useState(1);
-  const [minors, setMinors] = useState(0);
+  const [date, setDate] = useState<string>(initialData?.date ?? 'sin-fecha');
+  const [adults, setAdults] = useState<number>(() => {
+    const val = initialData?.peopleAdults;
+    return typeof val === 'number' && val > 0 ? val : 1;
+  });
+  const [minors, setMinors] = useState<number>(() => {
+    const val = initialData?.peopleMinors;
+    return typeof val === 'number' && val > 0 ? val : 0;
+  });
   const peopleTotal = useMemo(() => Math.max(0, (Number(adults) || 0) + (Number(minors) || 0)), [adults, minors]);
   const [depositPercentAdults, setDepositPercentAdults] = useState<string>('');
   const [depositPercentMinors, setDepositPercentMinors] = useState<string>('');
-  const [form, setForm] = useState<FormState>(DEFAULT_FORM_STATE);
+  const [form, setForm] = useState<FormState>(() => {
+    if (initialData?.customerName) {
+      const parts = String(initialData.customerName).trim().split(/\s+/);
+      return {
+        ...DEFAULT_FORM_STATE,
+        customerFirstName: parts[0] ?? '',
+        customerLastName: parts.slice(1).join(' ') ?? '',
+        customerEmail: initialData.customerEmail ?? '',
+        customerPhone: initialData.customerPhone ?? '',
+        customerDocument: initialData.customerDocument ?? '',
+        customerBirthDate: initialData.customerBirthDate ?? '',
+        customerComments: initialData.customerComments ?? '',
+      };
+    }
+    return DEFAULT_FORM_STATE;
+  });
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<ReservationStatus>('reserved');
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([]);
@@ -139,9 +181,21 @@ export default function AdminReservaForm({ paquetes }: Props) {
   const [seatLoading, setSeatLoading] = useState(false);
   const [seatData, setSeatData] = useState<{ template: SeatLayoutTemplate; seats: DepartureSeat[] } | null>(null);
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
-  const [pickupPoint, setPickupPoint] = useState<string>('');
-  const [roomType, setRoomType] = useState<ReservationRoomType>('matrimonial');
-  const [selectedExtraCodes, setSelectedExtraCodes] = useState<string[]>([]);
+  const [selectedExtraCodes, setSelectedExtraCodes] = useState<string[]>(initialData?.selectedExtraCodes ?? []);
+  /**
+   * Adicionales elegidos (del paquete actual o importados de otras
+   * excursiones): se envían como `manualExtras` con precio fijado, así no
+   * dependen del catálogo del paquete destino.
+   */
+  const [manualExtras, setManualExtras] = useState<
+    Array<{ key: string; title: string; price: number; packageTitle?: string }>
+  >([]);
+  const [showAddonCatalog, setShowAddonCatalog] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [addonCatalog, setAddonCatalog] = useState<
+    Array<{ packageId: string; packageTitle: string; addon: { id: string; title: string; description: string; price: number } }>
+  >([]);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [passengerDetails, setPassengerDetails] = useState<TravelerForm[]>([]);
 
   const selectedPaquete = useMemo(
@@ -160,6 +214,7 @@ export default function AdminReservaForm({ paquetes }: Props) {
   }, [selectedPackageId, date]);
 
   useEffect(() => {
+    if (hideVendorSelect) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -176,6 +231,7 @@ export default function AdminReservaForm({ paquetes }: Props) {
   }, []);
 
   useEffect(() => {
+    if (hideReferral) return;
     let cancelled = false;
     const loadLinks = async () => {
       if (!vendorId) {
@@ -214,6 +270,22 @@ export default function AdminReservaForm({ paquetes }: Props) {
     if (!exists) setSelectedReferralCode('');
   }, [referralLinksForPackage, selectedReferralCode, vendorId]);
 
+  // Asignación automática de vendor en modo vendedor (hideVendorSelect)
+  useEffect(() => {
+    if (!hideVendorSelect || !user || !user.email || vendorId) return;
+    const load = async () => {
+      try {
+        const email = user.email;
+        if (!email) return;
+        const vendor = await getVendorByEmail(email);
+        if (vendor) setVendorId(vendor.id);
+      } catch {
+        // ignore
+      }
+    };
+    load();
+  }, [hideVendorSelect, user, vendorId]);
+
   const dateOptions = useMemo<string[]>(() => {
     if (!selectedPaquete) return [];
     return getOperationalDepartureDates(selectedPaquete);
@@ -230,6 +302,16 @@ export default function AdminReservaForm({ paquetes }: Props) {
   const handleFormChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
+
+  const handleNationalityChange = (countryName: string) => {
+    setForm((prev) => ({
+      ...prev,
+      customerCountry: countryName,
+      customerPhone: applyPhonePrefix(prev.customerPhone, getCountryDialCode(countryName)),
+    }));
+  };
+
+  const selectedDialCode = getCountryDialCode(form.customerCountry) || '+54';
 
   const formattedDateLabel = useMemo(() => {
     if (!date || date === 'sin-fecha') return 'Sin fecha específica';
@@ -250,29 +332,77 @@ export default function AdminReservaForm({ paquetes }: Props) {
     return resolveDepartureConfig(selectedPaquete, date);
   }, [selectedPaquete, date]);
   const currency = String(resolvedSelectedDeparture?.displayCurrency ?? selectedPaquete?.moneda ?? 'ARS').toUpperCase();
-  const pickupPointOptions = useMemo(
-    () =>
-      (resolvedSelectedDeparture?.pickupPointsConfig ?? []).filter(
-        (item) => String(item?.label ?? '').trim().length > 0
-      ),
-    [resolvedSelectedDeparture?.pickupPointsConfig]
-  );
-  const pickupPointTimes = useMemo(
-    () =>
-      new Map(
-        pickupPointOptions.map((item) => [String(item.label).trim(), String(item.time ?? '').trim() || null])
-      ),
-    [pickupPointOptions]
-  );
+
+  // Al cambiar de paquete se descartan los adicionales propios (sus ids no
+  // existen en el otro), pero se conservan los importados del catálogo.
+  useEffect(() => {
+    setManualExtras((prev) => prev.filter((item) => item.key.startsWith('catalog:')));
+  }, [selectedPackageId]);
+
+  // Catálogo de adicionales de TODAS las excursiones (para importar desde
+  // otras). Se carga bajo demanda al abrir el buscador. Precio en unidades.
+  useEffect(() => {
+    if (!showAddonCatalog) return;
+    let cancelled = false;
+    setLoadingCatalog(true);
+    getAllPaquetesAdmin()
+      .then((all) => {
+        if (cancelled) return;
+        const entries: Array<{
+          packageId: string;
+          packageTitle: string;
+          addon: { id: string; title: string; description: string; price: number };
+        }> = [];
+        for (const pkg of all) {
+          if (!pkg || pkg.id === selectedPackageId) continue;
+          const options = getPackageAddonOptions(pkg as any);
+          for (const option of options) {
+            entries.push({
+              packageId: pkg.id,
+              packageTitle: String(pkg.titulo ?? 'Sin título'),
+              addon: { id: option.id, title: option.title, description: option.description, price: option.price },
+            });
+          }
+        }
+        entries.sort((a, b) =>
+          a.packageTitle.localeCompare(b.packageTitle, 'es') || a.addon.title.localeCompare(b.addon.title, 'es')
+        );
+        setAddonCatalog(entries);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('No pudimos cargar los adicionales.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCatalog(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAddonCatalog, selectedPackageId]);
+
+  const filteredCatalog = useMemo(() => {
+    const query = catalogQuery.trim().toLowerCase();
+    if (!query) return addonCatalog;
+    return addonCatalog.filter(
+      (entry) =>
+        entry.addon.title.toLowerCase().includes(query) ||
+        entry.packageTitle.toLowerCase().includes(query)
+    );
+  }, [addonCatalog, catalogQuery]);
+
   const selectedExtras = useMemo(() => {
     if (!selectedPaquete) return [];
     return resolveReservationExtraSelections({
       paquete: selectedPaquete,
-      pickupPoint: pickupPoint || null,
       selectedExtraCodes,
+      manualExtras: manualExtras.map((item) => ({ label: item.title, amount: item.price })),
       seatLayoutTemplate: seatData?.template ?? null,
     });
-  }, [pickupPoint, seatData?.template, selectedExtraCodes, selectedPaquete]);
+  }, [seatData?.template, manualExtras, selectedExtraCodes, selectedPaquete]);
+  const packageAddonOptions = useMemo(
+    () => (selectedPaquete ? getPackageAddonOptions(selectedPaquete) : []),
+    [selectedPaquete]
+  );
   const seatExtraOptions = useMemo(
     () => getSeatLayoutExtraOptions(seatData?.template ?? null),
     [seatData?.template]
@@ -286,10 +416,9 @@ export default function AdminReservaForm({ paquetes }: Props) {
       peopleMinors: Math.max(0, Number(minors) || 0),
       depositPercentAdults: Number.isFinite(dpAdults) ? dpAdults : null,
       depositPercentMinors: Number.isFinite(dpMinors) ? dpMinors : null,
-      roomType,
       selectedExtras,
     });
-  }, [adults, date, depositPercentAdults, depositPercentMinors, minors, roomType, selectedExtras, selectedPaquete]);
+  }, [adults, date, depositPercentAdults, depositPercentMinors, minors, selectedExtras, selectedPaquete]);
   const amountTotal = useMemo(() => computedPricing?.subtotalAmount ?? 0, [computedPricing]);
   const amountLabel = useMemo(() => {
     const value = amountTotal / 100;
@@ -322,16 +451,6 @@ export default function AdminReservaForm({ paquetes }: Props) {
       return Array.from({ length: needed }, (_, index) => prev[index] ?? { ...EMPTY_TRAVELER });
     });
   }, [peopleTotal]);
-
-  useEffect(() => {
-    if (!pickupPointOptions.length) {
-      if (pickupPoint) setPickupPoint('');
-      return;
-    }
-    if (!pickupPoint || !pickupPointOptions.some((item) => item.label === pickupPoint)) {
-      setPickupPoint(String(pickupPointOptions[0]?.label ?? ''));
-    }
-  }, [pickupPoint, pickupPointOptions]);
 
   useEffect(() => {
     const validCodes = new Set(seatExtraOptions.map((item) => item.code));
@@ -465,8 +584,15 @@ export default function AdminReservaForm({ paquetes }: Props) {
       toast.error('Debes iniciar sesión para crear la reserva');
       return;
     }
-    if (!form.customerEmail || !form.customerName) {
-      toast.error('Completa nombre y email del cliente');
+    if (!form.customerEmail || !form.customerFirstName.trim() || !form.customerLastName.trim()) {
+      toast.error('Completa nombre, apellido y email del titular');
+      return;
+    }
+    if (
+      form.customerFirstName.trim().length < NAME_MIN_LENGTH ||
+      form.customerLastName.trim().length < NAME_MIN_LENGTH
+    ) {
+      toast.error('Nombre y apellido deben tener al menos 2 caracteres');
       return;
     }
     if (!DATE_REGEX.test(form.customerBirthDate.trim())) {
@@ -495,8 +621,8 @@ export default function AdminReservaForm({ paquetes }: Props) {
     setSubmitting(true);
     try {
       const token = await user.getIdToken();
-      const response = await fetch('/api/admin/reservas', {
-        method: 'POST',
+      const response = await fetch(apiEndpoint || '/api/admin/reservas', {
+        method: initialData ? 'PATCH' : 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -506,10 +632,10 @@ export default function AdminReservaForm({ paquetes }: Props) {
           date,
           peopleAdults: Math.max(0, Number(adults) || 0),
           peopleMinors: Math.max(0, Number(minors) || 0),
-          status,
-          allowOverbook: Boolean(allowOverbook),
+          ...(!hideStatus ? { status } : {}),
+          ...(!hideOverbook ? { allowOverbook: Boolean(allowOverbook) } : {}),
           customerEmail: form.customerEmail,
-          customerName: form.customerName,
+          customerName: `${form.customerFirstName.trim()} ${form.customerLastName.trim()}`.trim(),
           customerPhone: form.customerPhone || undefined,
           customerCountry: form.customerCountry || undefined,
           customerDocument: form.customerDocument || undefined,
@@ -518,10 +644,15 @@ export default function AdminReservaForm({ paquetes }: Props) {
           passengerDetails: sanitizedPassengerDetails,
           ...(depositPercentAdults.trim() ? { depositPercentAdults: Number(depositPercentAdults) } : {}),
           ...(depositPercentMinors.trim() ? { depositPercentMinors: Number(depositPercentMinors) } : {}),
-          ...(pickupPoint ? { pickupPoint } : {}),
-          ...(pickupPoint ? { pickupPointTime: pickupPointTimes.get(pickupPoint) || null } : {}),
-          roomType,
           ...(selectedExtraCodes.length ? { selectedExtraCodes } : {}),
+          ...(manualExtras.length
+            ? {
+                manualExtras: manualExtras.map((item) => ({
+                  title: item.title,
+                  price: Math.max(0, Number(item.price) || 0),
+                })),
+              }
+            : {}),
           ...(seatsEnabled ? { selectedSeats: selectedSeatLabels } : {}),
           ...(attachments.length > 0
             ? {
@@ -530,30 +661,31 @@ export default function AdminReservaForm({ paquetes }: Props) {
                   url: item.url,
                   name: item.name,
                   type: item.type,
-                  uploadedBy: 'admin',
+                  uploadedBy: hideVendorSelect ? 'vendor' : 'admin',
                 })),
               }
             : {}),
           ...(vendorId ? { vendorId } : {}),
-          ...(manualReferralCode.trim()
+          ...(!hideReferral && (manualReferralCode.trim()
             ? { referralCode: manualReferralCode.trim() }
             : selectedReferralCode.trim()
               ? { referralCode: selectedReferralCode.trim() }
-              : {}),
+              : {})),
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.detail ? `${errorData.error} (${errorData.detail})` : (errorData?.error ?? 'No se pudo crear la reserva'));
+        const detailMessage = errorData?.detail ? `${errorData.error} (${errorData.detail})` : (errorData?.error ?? 'No se pudo crear la reserva');
+        throw new Error(detailMessage);
       }
 
       const payload = await response.json();
       toast.success('Reserva creada exitosamente');
-      router.push(`/admin/ventas/${payload.id}`);
+      router.push(successRedirect ? successRedirect.replace(':id', payload.id) : `/admin/ventas/${payload.id}`);
     } catch (error) {
       console.error('[AdminReservaForm] Error creando reserva:', error);
-      toast.error('No pudimos crear la reserva, revisá los datos e intentá otra vez');
+      toast.error(error instanceof Error && error.message ? error.message : 'No pudimos crear la reserva, revisá los datos e intentá otra vez');
     } finally {
       setSubmitting(false);
     }
@@ -561,45 +693,37 @@ export default function AdminReservaForm({ paquetes }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 rounded-2xl bg-gradient-to-r from-primary/10 to-secondary/10 p-6 shadow-xl sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-3xl border border-black/5 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-success-strong">
-            Acción exclusiva
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+            Ventas · Nueva venta manual
           </p>
-          <h1 className="mt-2 text-3xl font-semibold text-gray-900">Crear reserva manual</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Completa los datos del cliente, agrega lo documentos necesarios y define el estado.
+          <h1 className="mt-1.5 text-[22px] font-bold tracking-[-0.02em] text-gray-900">Crear reserva manual</h1>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Cargá el paquete, el titular y los pasajeros. Los comentarios y los comprobantes son opcionales.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant="outline" className="text-sm">
-            {selectedPaquete ? 'Paquete seleccionado' : 'Elegí un paquete'}
-          </Badge>
-          <Button asChild variant="ghost" className="text-sm font-medium">
-            <Link href="/admin/ventas">Ver ventas existentes</Link>
-          </Button>
-        </div>
+        <Button asChild variant="outline" className="shrink-0 rounded-full text-sm font-medium">
+          <Link href="/admin/ventas">Ver ventas existentes</Link>
+        </Button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card className="space-y-6 bg-white/90 shadow-2xl">
-          <CardHeader className="space-y-2">
-            <CardTitle className="text-lg font-semibold text-gray-900">
-              Datos de la reserva
-            </CardTitle>
-            <p className="text-sm text-gray-500">
-              Se calculan automáticamente precio, moneda y auditoría según el paquete elegido.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-1 md:col-span-2">
-                  <Label>Paquete</Label>
-                  <Select
-                    value={selectedPackageId}
-                    onValueChange={(value) => setSelectedPackageId(value)}
-                  >
+      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <Card className="bg-white shadow-sm ring-1 ring-black/5">
+          <CardContent className="p-5 sm:p-6">
+            <form onSubmit={handleSubmit} className="space-y-7">
+              <section className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">01 · Reserva</span>
+                  <div className="h-px flex-1 bg-gray-100" />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Paquete</Label>
+                    <Select
+                      value={selectedPackageId}
+                      onValueChange={(value) => setSelectedPackageId(value)}
+                    >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Seleccioná un paquete" />
                     </SelectTrigger>
@@ -614,23 +738,25 @@ export default function AdminReservaForm({ paquetes }: Props) {
                 </div>
                 <div className="space-y-1">
                   <Label>Estado</Label>
-                  <Select value={status} onValueChange={(value) => setStatus(value as ReservationStatus)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {statusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {!hideStatus && (
+                    <Select value={status} onValueChange={(value) => setStatus(value as ReservationStatus)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Estado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {statusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
                   <Label>Fecha / salida</Label>
                   {dateOptions.length > 0 ? (
                     <Select value={date} onValueChange={(value) => setDate(value)}>
@@ -653,19 +779,13 @@ export default function AdminReservaForm({ paquetes }: Props) {
                       onChange={(event) => setDate(event.target.value || 'sin-fecha')}
                     />
                   )}
-                  <p className="text-xs text-gray-500">
-                    {formattedDateLabel}
-                    {dateOptions.length > 0 && ' • Fechas disponibles'}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    La reserva manual ya no valida cupos ni stock legacy.
-                  </p>
+                  <p className="text-xs capitalize text-gray-500">{formattedDateLabel}</p>
                 </div>
-                <div className="space-y-1">
-                  <Label>Personas</Label>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Pasajeros</Label>
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
-                      <Label className="text-xs text-gray-600">Adultos</Label>
+                      <Label className="text-xs text-gray-500">Adultos</Label>
                       <Input
                         type="number"
                         min={0}
@@ -675,7 +795,7 @@ export default function AdminReservaForm({ paquetes }: Props) {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-gray-600">Menores</Label>
+                      <Label className="text-xs text-gray-500">Menores</Label>
                       <Input
                         type="number"
                         min={0}
@@ -689,286 +809,393 @@ export default function AdminReservaForm({ paquetes }: Props) {
                     Máximo por reserva:{' '}
                     {selectedPaquete?.bookingConfig?.maxPeoplePerBooking ?? selectedPaquete?.capacidadMaxima ?? 50}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    Pasajeros: {peopleTotal} · Total: {peopleTotal > 0 ? amountLabel : '—'}
-                  </p>
-                  {selectedPaquete?.reservationPricing?.mode === 'percent' ? (
-                    <div className="mt-2 grid gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                      <div className="text-xs font-semibold text-gray-700">Override de porcentaje (opcional)</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-gray-600">Adultos (%)</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={depositPercentAdults}
-                            onChange={(e) => setDepositPercentAdults(e.target.value)}
-                            placeholder="Auto"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-gray-600">Menores (%)</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={depositPercentMinors}
-                            onChange={(e) => setDepositPercentMinors(e.target.value)}
-                            placeholder="Auto"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-1">
-                  <Label>Lugar de ascenso</Label>
-                  {pickupPointOptions.length > 0 ? (
-                    <>
-                      <Select value={pickupPoint || 'none'} onValueChange={(value) => setPickupPoint(value === 'none' ? '' : value)}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccioná un ascenso" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Sin ascenso</SelectItem>
-                          {pickupPointOptions.map((item) => (
-                            <SelectItem key={item.label} value={item.label}>
-                              {item.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-gray-500">
-                        {pickupPoint
-                          ? `Horario: ${pickupPointTimes.get(pickupPoint) || 'A confirmar'}`
-                          : 'Podés dejarlo sin definir si todavía no está confirmado.'}
-                      </p>
-                    </>
-                  ) : (
-                    <Input value="Sin ascensos configurados" readOnly className="bg-gray-50 text-gray-500" />
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label>Habitación</Label>
-                  <Select value={roomType} onValueChange={(value) => setRoomType(value as ReservationRoomType)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccioná una opción" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="matrimonial">Matrimonial</SelectItem>
-                      <SelectItem value="twin">Twin</SelectItem>
-                      <SelectItem value="full-day">Full day</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-gray-500">Dato operativo. No modifica el precio.</p>
-                </div>
-                <div className="space-y-1">
-                  <Label>Extras</Label>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                    {seatExtraOptions.length > 0 ? (
-                      <div className="space-y-2">
-                        {seatExtraOptions.map((extra) => (
-                          <label key={extra.code} className="flex items-center justify-between gap-3 text-sm text-gray-700">
-                            <span className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={selectedExtraCodes.includes(extra.code)}
-                                onChange={(e) =>
-                                  setSelectedExtraCodes((prev) =>
-                                    e.target.checked
-                                      ? Array.from(new Set([...prev, extra.code]))
-                                      : prev.filter((code) => code !== extra.code)
-                                  )
-                                }
-                                className="h-4 w-4 rounded border-gray-300"
-                              />
-                              {extra.label}
-                            </span>
-                            <span className="text-xs font-medium text-gray-500">
-                              {formatAmountCents(extra.amount, currency)}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-500">Esta salida no tiene extras comerciales configurados.</p>
-                    )}
+              {selectedPaquete?.reservationPricing?.mode === 'percent' ? (
+                <div className="grid gap-3 rounded-2xl bg-gray-50 p-4 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-600">Adultos (%)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={depositPercentAdults}
+                      onChange={(e) => setDepositPercentAdults(e.target.value)}
+                      placeholder="Auto"
+                    />
                   </div>
-                </div>
-              </div>
-
-              {seatsEnabled && date !== 'sin-fecha' ? (
-                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">Butacas</div>
-                      <div className="text-xs text-gray-600">
-                        Seleccionadas: <span className="font-semibold text-gray-900">{selectedSeatLabels.length}</span> / {peopleTotal}
-                      </div>
-                      {selectedSeatLabels.length > 0 ? (
-                        <div className="mt-1 text-xs text-gray-600">{selectedSeatLabels.join(', ')}</div>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={seatLoading || submitting}
-                        onClick={() => {
-                          setSeatDialogOpen(true);
-                          if (!seatData) void fetchSeatMap();
-                        }}
-                      >
-                        Elegir butacas
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        disabled={seatLoading || submitting}
-                        onClick={() => setSelectedSeatIds([])}
-                      >
-                        Limpiar
-                      </Button>
-                    </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-600">Menores (%)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={depositPercentMinors}
+                      onChange={(e) => setDepositPercentMinors(e.target.value)}
+                      placeholder="Auto"
+                    />
                   </div>
                 </div>
               ) : null}
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>Nombre del cliente</Label>
-                  <Input
-                    required
-                    value={form.customerName}
-                    onChange={(event) => handleFormChange('customerName', event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Email del cliente</Label>
-                  <Input
-                    required
-                    type="email"
-                    value={form.customerEmail}
-                    onChange={(event) => handleFormChange('customerEmail', event.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>Teléfono</Label>
-                  <Input
-                    type="tel"
-                    value={form.customerPhone}
-                    onChange={(event) => handleFormChange('customerPhone', event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>País</Label>
-                  <Input
-                    value={form.customerCountry}
-                    onChange={(event) => handleFormChange('customerCountry', event.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>Documento o DNI</Label>
-                  <Input
-                    value={form.customerDocument}
-                    onChange={(event) => handleFormChange('customerDocument', event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Fecha de nacimiento</Label>
-                  <ArgentineDateInput
-                    value={form.customerBirthDate}
-                    onChange={(value) => handleFormChange('customerBirthDate', value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label>Referidos (opcional)</Label>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-1">
-                <Select
-                  value={vendorId || 'none'}
-                  onValueChange={(value) => {
-                    setVendorId(value === 'none' ? '' : value);
-                    setSelectedReferralCode('');
-                    setManualReferralCode('');
-                  }}
-                >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccioná un vendedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                    <SelectItem value="none">Sin vendedor</SelectItem>
-                        {vendors.map((v) => (
-                          <SelectItem key={v.id} value={v.id}>
-                            {v.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {packageAddonOptions.length > 0 ? (
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <Label className="text-xs text-gray-600">Adicionales del paquete</Label>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Se cobran una sola vez por reserva, no por persona.
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {packageAddonOptions.map((addon) => {
+                      const key = `pkg:${selectedPackageId}:${addon.id}`;
+                      const checked = manualExtras.some((item) => item.key === key);
+                      return (
+                        <label
+                          key={addon.id}
+                          className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition ${
+                            checked ? 'border-neutral-300 bg-white' : 'border-transparent bg-white'
+                          }`}
+                        >
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(next) =>
+                                setManualExtras((prev) =>
+                                  next
+                                    ? [
+                                        ...prev,
+                                        {
+                                          key,
+                                          title: addon.title,
+                                          price: Math.max(0, Number(addon.price) || 0),
+                                        },
+                                      ]
+                                    : prev.filter((item) => item.key !== key)
+                                )
+                              }
+                              disabled={submitting}
+                              aria-label={addon.title}
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-medium text-gray-900">{addon.title}</span>
+                              {addon.description ? (
+                                <span className="block truncate text-xs text-gray-500">{addon.description}</span>
+                              ) : null}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-900">
+                            ${Math.max(0, Number(addon.price) || 0).toLocaleString('es-AR')}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
-                  <div className="space-y-1">
-                    <Select
-                      value={selectedReferralCode || 'none'}
-                      onValueChange={(value) => {
-                        setSelectedReferralCode(value === 'none' ? '' : value);
-                        setManualReferralCode('');
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <Label className="text-xs text-gray-600">Adicionales de otras excursiones</Label>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Traé un adicional creado para otra excursión sin salir de acá.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={submitting || loadingCatalog}
+                    onClick={() => setShowAddonCatalog((prev) => !prev)}
+                  >
+                    {showAddonCatalog ? 'Ocultar' : loadingCatalog ? 'Cargando…' : 'Buscar'}
+                  </Button>
+                </div>
+                {manualExtras.length > 0 ? (
+                  <div className="mt-3 space-y-1.5">
+                    {manualExtras
+                      .filter((item) => item.key.startsWith('catalog:'))
+                      .map((item) => (
+                        <div
+                          key={item.key}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-2"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-gray-900">{item.title}</span>
+                            <span className="block truncate text-xs text-gray-500">{item.packageTitle}</span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <span className="text-sm font-semibold tabular-nums text-gray-900">
+                              ${item.price.toLocaleString('es-AR')}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              disabled={submitting}
+                              onClick={() => setManualExtras((prev) => prev.filter((row) => row.key !== item.key))}
+                              aria-label={`Quitar ${item.title}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                ) : null}
+                {showAddonCatalog ? (
+                  <div className="mt-3">
+                    <Input
+                      value={catalogQuery}
+                      onChange={(event) => setCatalogQuery(event.target.value)}
+                      placeholder="Buscar por adicional o excursión…"
+                      disabled={submitting}
+                    />
+                    <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto pr-0.5">
+                      {filteredCatalog.length === 0 ? (
+                        <p className="rounded-xl bg-white px-3 py-2.5 text-xs text-gray-500">
+                          {loadingCatalog
+                            ? 'Cargando catálogo…'
+                            : 'Sin resultados. Ninguna otra excursión tiene adicionales que coincidan.'}
+                        </p>
+                      ) : (
+                        filteredCatalog.slice(0, 30).map((entry) => {
+                          const key = `catalog:${entry.packageId}:${entry.addon.id}`;
+                          const added = manualExtras.some((item) => item.key === key);
+                          return (
+                            <div
+                              key={key}
+                              className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/[0.04]"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-medium text-gray-900">{entry.addon.title}</span>
+                                <span className="block truncate text-xs text-gray-500">{entry.packageTitle}</span>
+                              </span>
+                              <span className="flex shrink-0 items-center gap-2">
+                                <span className="text-sm font-semibold tabular-nums text-gray-900">
+                                  ${entry.addon.price.toLocaleString('es-AR')}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant={added ? 'outline' : 'default'}
+                                  size="sm"
+                                  disabled={submitting || added}
+                                  onClick={() =>
+                                    setManualExtras((prev) =>
+                                      added
+                                        ? prev
+                                        : [
+                                            ...prev,
+                                            {
+                                              key,
+                                              title: entry.addon.title,
+                                              price: entry.addon.price,
+                                              packageTitle: entry.packageTitle,
+                                            },
+                                          ]
+                                    )
+                                  }
+                                >
+                                  {added ? 'Sumado' : 'Sumar'}
+                                </Button>
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+
+            {seatsEnabled && date !== 'sin-fecha' ? (
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">Butacas</div>
+                    <div className="text-xs text-gray-600">
+                      Seleccionadas: <span className="font-semibold text-gray-900">{selectedSeatLabels.length}</span> / {peopleTotal}
+                    </div>
+                    {selectedSeatLabels.length > 0 ? (
+                      <div className="mt-1 text-xs text-gray-600">{selectedSeatLabels.join(', ')}</div>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={seatLoading || submitting}
+                      onClick={() => {
+                        setSeatDialogOpen(true);
+                        if (!seatData) void fetchSeatMap();
                       }}
-                      disabled={!vendorId || referralLinksForPackage.length === 0}
                     >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Elegí un código del vendedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin código</SelectItem>
-                        {referralLinksForPackage.length === 0 ? (
+                      Elegir butacas
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={seatLoading || submitting}
+                      onClick={() => setSelectedSeatIds([])}
+                    >
+                      Limpiar
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+              <section className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">02 · Titular</span>
+                  <div className="h-px flex-1 bg-gray-100" />
+                </div>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label>Nombre *</Label>
+                    <Input
+                      required
+                      value={form.customerFirstName}
+                      onChange={(event) => handleFormChange('customerFirstName', event.target.value)}
+                      placeholder="Ej: Juan"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Apellido *</Label>
+                    <Input
+                      required
+                      value={form.customerLastName}
+                      onChange={(event) => handleFormChange('customerLastName', event.target.value)}
+                      placeholder="Ej: Garcia"
+                    />
+                  </div>
+                  <div className="col-span-2 space-y-1.5 md:col-span-1">
+                    <Label>Email *</Label>
+                    <Input
+                      required
+                      type="email"
+                      value={form.customerEmail}
+                      onChange={(event) => handleFormChange('customerEmail', event.target.value)}
+                      placeholder="tu@email.com"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Nacionalidad</Label>
+                    <NationalitySelect
+                      value={form.customerCountry || DEFAULT_COUNTRY_NAME}
+                      onChange={handleNationalityChange}
+                      placeholder="Seleccioná la nacionalidad"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>WhatsApp</Label>
+                    <PhoneWithPrefixInput
+                      value={form.customerPhone}
+                      dialCode={selectedDialCode}
+                      onValueChange={(next) => handleFormChange('customerPhone', next)}
+                      placeholder="11 ..."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>DNI / Pasaporte</Label>
+                    <Input
+                      value={form.customerDocument}
+                      onChange={(event) => handleFormChange('customerDocument', event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Fecha de nacimiento</Label>
+                    <ArgentineDateInput
+                      value={form.customerBirthDate}
+                      onChange={(value) => handleFormChange('customerBirthDate', value)}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              {!hideReferral && !hideVendorSelect && (
+                <section className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">03 · Referidos (opcional)</span>
+                    <div className="h-px flex-1 bg-gray-100" />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="space-y-1">
+                  <Select
+                    value={vendorId || 'none'}
+                    onValueChange={(value) => {
+                      setVendorId(value === 'none' ? '' : value);
+                      setSelectedReferralCode('');
+                      setManualReferralCode('');
+                    }}
+                  >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Seleccioná un vendedor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                      <SelectItem value="none">Sin vendedor</SelectItem>
+                          {vendors.map((v) => (
+                            <SelectItem key={v.id} value={v.id}>
+                              {v.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Select
+                        value={selectedReferralCode || 'none'}
+                        onValueChange={(value) => {
+                          setSelectedReferralCode(value === 'none' ? '' : value);
+                          setManualReferralCode('');
+                        }}
+                        disabled={!vendorId || referralLinksForPackage.length === 0}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Elegí un código del vendedor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Sin código</SelectItem>
+                          {referralLinksForPackage.length === 0 ? (
                       <SelectItem value="__no_codes__" disabled>
                             Sin códigos disponibles
                           </SelectItem>
-                        ) : (
-                          referralLinksForPackage.map((l) => (
-                            <SelectItem key={l.id} value={l.code}>
-                              {l.code} {l.experienceName ? `· ${l.experienceName}` : ''}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
+                          ) : (
+                            referralLinksForPackage.map((l) => (
+                              <SelectItem key={l.id} value={l.code}>
+                                {l.code} {l.experienceName ? `· ${l.experienceName}` : ''}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Input
+                        placeholder="o ingresá un código manual"
+                        value={manualReferralCode}
+                        onChange={(e) => {
+                          setManualReferralCode(e.target.value);
+                          if (e.target.value.trim()) setSelectedReferralCode('');
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Input
-                      placeholder="o ingresá un código manual"
-                      value={manualReferralCode}
-                      onChange={(e) => {
-                        setManualReferralCode(e.target.value);
-                        if (e.target.value.trim()) setSelectedReferralCode('');
-                      }}
-                    />
-                    <p className="text-xs text-gray-500">
-                      Si completás este campo, se usará el código exacto.
-                    </p>
-                  </div>
-                </div>
-              </div>
+                </section>
+              )}
 
               {passengerDetails.length > 0 ? (
-                <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div>
-                    <Label>Pasajeros</Label>
-                    <p className="text-xs text-gray-500">
-                      Completá los datos de los {passengerDetails.length} pasajero{passengerDetails.length === 1 ? '' : 's'} adicional{passengerDetails.length === 1 ? '' : 'es'}.
-                    </p>
+                <section className="space-y-3 rounded-2xl bg-gray-50 p-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">04 · Pasajeros adicionales</span>
+                    <div className="h-px flex-1 bg-gray-100" />
                   </div>
                   <div className="space-y-3">
                     {passengerDetails.map((traveler, index) => (
@@ -1056,172 +1283,194 @@ export default function AdminReservaForm({ paquetes }: Props) {
                           </div>
                         </div>
                       </div>
-                    ))}
+                     ))}
                   </div>
-                </div>
+                </section>
               ) : null}
 
-              <div className="space-y-1">
-                <Label>Comentarios del cliente</Label>
-                <Textarea
-                  value={form.customerComments}
-                  onChange={(event) => handleFormChange('customerComments', event.target.value)}
-                  placeholder="Anotá condiciones especiales, requerimientos o cualquier observación"
-                  className="min-h-[100px]"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Comprobantes y archivos</Label>
+              <section className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <Button variant="outline" className="rounded-full px-4" asChild>
-                    <label className="cursor-pointer">
-                      {uploadingFiles ? 'Subiendo...' : 'Subir archivos'}
-                      <input
-                        type="file"
-                        accept=".pdf,image/*"
-                        multiple
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                    </label>
-                  </Button>
-                  {uploadingFiles && <span className="text-xs text-gray-500">Procesando archivos...</span>}
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">05 · Notas y comprobantes (opcional)</span>
+                  <div className="h-px flex-1 bg-gray-100" />
                 </div>
-                {attachments.length > 0 ? (
-                  <div className="space-y-2 rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-3">
-                    {attachments.map((attachment) => (
-                      <div
-                        key={attachment.id}
-                        className="flex items-center justify-between gap-3 rounded-lg bg-white/80 p-3"
-                      >
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-gray-900">{attachment.name}</p>
-                          <p className="text-xs text-gray-500">{attachment.type || 'Archivo adjunto'}</p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRemoveAttachment(attachment)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500">Aún no cargaste comprobantes.</p>
-                )}
-              </div>
 
-              <div className="flex flex-col gap-3 pt-2">
-                <Button type="submit" variant="success" disabled={submitting}>
+                <div className="space-y-1.5">
+                  <Label>Comentarios del cliente</Label>
+                  <Textarea
+                    value={form.customerComments}
+                    onChange={(event) => handleFormChange('customerComments', event.target.value)}
+                    placeholder="Anotá condiciones especiales, requerimientos o cualquier observación"
+                    className="min-h-[100px]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Comprobantes y archivos</Label>
+                  <div className="flex items-center gap-3">
+                    <Button variant="outline" className="rounded-full px-4" asChild>
+                      <label className="cursor-pointer">
+                        {uploadingFiles ? 'Subiendo...' : 'Subir archivos'}
+                        <input
+                          type="file"
+                          accept=".pdf,image/*"
+                          multiple
+                          onChange={handleFileUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </Button>
+                    {uploadingFiles && <span className="text-xs text-gray-500">Procesando archivos...</span>}
+                  </div>
+                  {attachments.length > 0 ? (
+                    <div className="space-y-2 rounded-2xl border border-dashed border-gray-200 bg-white p-3">
+                      {attachments.map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-gray-900">{attachment.name}</p>
+                            <p className="text-xs text-gray-500">{attachment.type || 'Archivo adjunto'}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleRemoveAttachment(attachment)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500">Aún no cargaste comprobantes.</p>
+                  )}
+                </div>
+              </section>
+
+              <div className="space-y-3">
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  className="group h-12 w-full rounded-full bg-neutral-900 text-[15px] font-semibold tracking-[-0.01em] text-white transition-all duration-300 hover:bg-neutral-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40"
+                >
                   {submitting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Guardando reserva
                     </>
                   ) : (
-                    'Confirmar reserva manual'
+                    'Crear reserva'
                   )}
                 </Button>
-                <p className="text-xs text-gray-500">
-                  Se registrará el precio y el snapshot de cupo/config. Si la fecha tiene cupos, se valida disponibilidad antes de confirmar.
-                </p>
               </div>
             </form>
           </CardContent>
         </Card>
 
-        <Card className="space-y-5 bg-gradient-to-b from-secondary/10 to-white/70 shadow-lg">
-          <CardHeader className="space-y-2">
-            <CardTitle className="text-base font-semibold text-gray-900">Resumen instantáneo</CardTitle>
-            <p className="text-xs text-gray-500">
-              Revisa los datos antes de confirmar. Todo se guarda en Firestore y queda disponible en
-              la sección de reservas.
-            </p>
+        <div className="lg:sticky lg:top-6 lg:self-start">
+        <Card className="bg-white shadow-sm ring-1 ring-black/5">
+          <CardHeader className="space-y-1 pb-4">
+            <CardTitle className="text-[15px] font-semibold text-gray-900">Resumen</CardTitle>
+            <p className="text-xs text-gray-400">Datos que se van a guardar en la venta.</p>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-1 rounded-2xl border border-gray-200 bg-white/70 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Paquete</p>
-              <p className="text-sm font-semibold text-gray-900">
-                {selectedPaquete?.titulo ?? 'Seleccioná un paquete'}
-              </p>
-              <p className="text-xs text-gray-500">
-                {selectedPaquete?.slug ?? '—'}
-              </p>
-              <Badge variant="outline" className="text-xs font-medium">
-                Reserva manual
-              </Badge>
-            </div>
-
-            <div className="space-y-1 rounded-2xl border border-gray-200 bg-white/70 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Fecha</p>
-              <p className="text-sm font-semibold text-gray-900">{formattedDateLabel}</p>
-              <p className="text-xs text-gray-500">Personas: {peopleTotal}</p>
-              <p className="text-xs text-gray-500">
-                Ascenso: {pickupPoint || 'Sin definir'}
-                {pickupPoint ? ` · ${pickupPointTimes.get(pickupPoint) || 'Horario a confirmar'}` : ''}
-              </p>
-              <p className="text-xs text-gray-500">Habitación: {ROOM_TYPE_LABELS[roomType]}</p>
-              <p className="text-xs text-gray-500">
-                Base: {computedPricing ? formatAmountCents(computedPricing.baseSubtotalAmount, currency) : '—'}
-              </p>
-              <p className="text-xs text-gray-500">
-                Extras: {computedPricing ? formatAmountCents(computedPricing.extrasTotalAmount, currency) : '—'}
-              </p>
-              <p className="text-xs text-gray-500">Total: {peopleTotal > 0 ? amountLabel : '—'}</p>
-            </div>
-
-            {seatsEnabled ? (
-              <div className="space-y-1 rounded-2xl border border-gray-200 bg-white/70 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-500">Butacas</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {selectedSeatLabels.length > 0 ? selectedSeatLabels.join(', ') : '—'}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {selectedSeatLabels.length} / {peopleTotal}
+          <CardContent className="space-y-5">
+            <div className="divide-y divide-gray-100 rounded-2xl border border-gray-100">
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Paquete</p>
+                <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">
+                  {selectedPaquete?.titulo ?? '—'}
                 </p>
               </div>
-            ) : null}
-
-            <div className="space-y-1 rounded-2xl border border-gray-200 bg-white/70 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Cliente</p>
-              <p className="text-sm font-semibold text-gray-900">
-                {form.customerName || '—'}
-              </p>
-              <p className="text-xs text-gray-500">{form.customerEmail || '—'}</p>
-              <p className="text-xs text-gray-500">
-                Nacimiento: {form.customerBirthDate || '—'}
-              </p>
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Fecha</p>
+                <p className="mt-0.5 text-sm font-medium capitalize text-gray-900">{formattedDateLabel}</p>
+              </div>
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Pasajeros</p>
+                <p className="mt-0.5 text-sm font-semibold text-gray-900">{peopleTotal}</p>
+              </div>
             </div>
 
-            <div className="space-y-1 rounded-2xl border border-gray-200 bg-white/70 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Extras operativos</p>
-              <p className="text-sm font-semibold text-gray-900">
-                {selectedExtras.length > 0 ? selectedExtras.map((extra) => extra.label).join(', ') : 'Sin extras'}
-              </p>
-              <p className="text-xs text-gray-500">
-                {passengerDetails.length > 0
-                  ? `${passengerDetails.length} pasajero${passengerDetails.length === 1 ? '' : 's'} adicional${passengerDetails.length === 1 ? '' : 'es'} cargado${passengerDetails.length === 1 ? '' : 's'}`
-                  : 'No hay pasajeros adicionales'}
-              </p>
+            <div className="rounded-2xl bg-gray-50 p-4">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">
+                <Receipt className="h-3.5 w-3.5" />
+                Precio
+              </div>
+              <div className="mt-3 space-y-2 text-sm">
+                <p className="flex items-center justify-between gap-3">
+                  <span className="text-gray-500">
+                    Subtotal · {peopleTotal} {peopleTotal === 1 ? 'pasajero' : 'pasajeros'}
+                  </span>
+                  <span className="font-semibold tabular-nums text-gray-900">
+                    {computedPricing ? formatAmountCents(computedPricing.baseSubtotalAmount, currency) : '—'}
+                  </span>
+                </p>
+                {selectedExtras.map((extra, index) => (
+                  <p key={`${extra.code}-${extra.source ?? index}`} className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 truncate text-gray-500">+ {extra.label}</span>
+                    <span className="shrink-0 font-semibold tabular-nums text-gray-900">
+                      {formatAmountCents(
+                        String(extra.scope) === 'per_booking' ? extra.amount : extra.amount * Math.max(1, peopleTotal),
+                        currency
+                      )}
+                    </span>
+                  </p>
+                ))}
+                {computedPricing && computedPricing.extrasTotalAmount > 0 ? (
+                  <p className="flex items-center justify-between gap-3 border-t border-gray-200 pt-2">
+                    <span className="text-gray-500">Extras totales</span>
+                    <span className="font-semibold tabular-nums text-gray-900">
+                      {formatAmountCents(computedPricing.extrasTotalAmount, currency)}
+                    </span>
+                  </p>
+                ) : null}
+                <p className="flex items-baseline justify-between gap-3 border-t border-gray-200 pt-2.5">
+                  <span className="text-sm font-bold text-gray-900">Total</span>
+                  <span className="text-[22px] font-black tabular-nums tracking-[-0.02em] text-gray-900">
+                    {peopleTotal > 0 ? amountLabel : '—'}
+                  </span>
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-1 rounded-2xl border border-gray-200 bg-white/70 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Comprobante</p>
-              {attachments.length > 0 ? (
-                <ul className="space-y-1 text-sm text-gray-700">
-                  {attachments.map((attachment) => (
-                    <li key={attachment.id}>{attachment.name}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500">Aún no cargaste comprobantes.</p>
-              )}
+            <div className="divide-y divide-gray-100 rounded-2xl border border-gray-100">
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Cliente</p>
+                <p className="mt-0.5 text-sm font-semibold text-gray-900">
+                  {`${form.customerFirstName} ${form.customerLastName}`.trim() || '—'}
+                </p>
+                <p className="text-xs text-gray-500">{form.customerEmail || '—'}</p>
+                <p className="text-xs text-gray-500">
+                  {form.customerPhone ? `WhatsApp ${form.customerPhone}` : 'Sin teléfono'}
+                  {' · '}
+                  Nacimiento: {form.customerBirthDate || '—'}
+                </p>
+              </div>
+              {form.customerComments.trim() ? (
+                <div className="px-4 py-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Comentarios</p>
+                  <p className="mt-0.5 whitespace-pre-line text-sm text-gray-600">{form.customerComments}</p>
+                </div>
+              ) : null}
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Comprobantes</p>
+                {attachments.length > 0 ? (
+                  <ul className="mt-0.5 space-y-0.5 text-sm text-gray-600">
+                    {attachments.map((attachment) => (
+                      <li key={attachment.id} className="truncate">
+                        {attachment.name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-0.5 text-xs text-gray-500">Aún no cargaste comprobantes.</p>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
+        </div>
       </div>
 
       <Dialog open={seatDialogOpen} onOpenChange={(open) => setSeatDialogOpen(open)}>

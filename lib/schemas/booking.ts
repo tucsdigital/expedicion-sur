@@ -26,6 +26,7 @@ export const bookingConfigSchema = z
     dates: z.array(bookingDateSchema),
     depositAmount: z.number().min(0),
     maxPeoplePerBooking: z.number().int().min(1).max(50).optional(),
+    minLeadHours: z.number().int().min(0).max(720).optional(),
     currency: z.enum(['ars', 'brl', 'usd']).default('ars'),
     paymentMethods: z.object({
       mercadoPago: z.boolean(),

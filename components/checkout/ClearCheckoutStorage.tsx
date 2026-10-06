@@ -22,6 +22,7 @@ export default function ClearCheckoutStorage({
     if (typeof window === 'undefined' || !slug) return;
     try {
       sessionStorage.removeItem(getCheckoutStorageKey(slug, date, people));
+      sessionStorage.removeItem('referral_code');
     } catch {
       // ignore
     }

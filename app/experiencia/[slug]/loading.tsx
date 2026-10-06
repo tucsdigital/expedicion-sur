@@ -101,7 +101,7 @@ export default function LoadingExcursionDetail() {
                 <div className="h-12 w-44 rounded bg-[#DCEBFA]" />
                 <Line w="w-36" />
                 <div className="h-28 rounded-2xl bg-[#EAF3FC]" />
-                <div className="h-11 rounded-2xl bg-[#F4D35C]" />
+                <div className="h-12 rounded-full bg-neutral-900" />
                 <div className="h-11 rounded-2xl bg-[#E6FAEF]" />
               </div>
             </div>

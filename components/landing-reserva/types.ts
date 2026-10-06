@@ -30,6 +30,11 @@ export type BookingConfig = {
   maxPeoplePerBooking?: number;
   /** Moneda operativa del checkout (ars, brl, usd). */
   currency: BookingCurrency;
+  /**
+   * Anticipación mínima (en horas) para reservar una fecha. Default 48.
+   * 0 = se permiten reservas sin anticipación mínima.
+   */
+  minLeadHours?: number;
   paymentMethods: {
     mercadoPago: boolean;
   };
@@ -136,15 +141,17 @@ export type ReservationTravelerDetails = {
   travelerType?: 'adult' | 'minor' | null;
 };
 
-export type ReservationRoomType = 'matrimonial' | 'twin' | 'full-day';
-
-export type ReservationExtraCode = 'cocheCama' | 'panoramicos' | 'cafeteras' | 'pickupPoint' | 'administrativeFee';
+export type ReservationExtraCode =
+  | 'cocheCama'
+  | 'panoramicos'
+  | 'cafeteras'
+  | 'packageAddon';
 
 export type ReservationExtraSelection = {
   code: ReservationExtraCode;
   label: string;
   amount: number;
-  source?: 'seatLayout' | 'pickupPoint' | string | null;
+  source?: 'seatLayout' | string | null;
   scope?: 'per_person' | 'per_booking' | string | null;
 };
 
@@ -163,9 +170,6 @@ export type Reservation = {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
-  pickupPoint?: string | null;
-  pickupPointTime?: string | null;
-  roomType?: ReservationRoomType | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   /** Monto total pagado en centavos */
   amountTotal: number;
@@ -190,6 +194,7 @@ export type Reservation = {
   customerEmail: string;
   customerName: string;
   customerPhone?: string;
+  /** Nacionalidad del pasajero principal (nombre de país, ej: "Argentina"). */
   customerCountry?: string;
   customerDocument?: string;
   customerBirthDate?: string | null;

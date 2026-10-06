@@ -19,6 +19,7 @@ import Newsletter from "@/components/Newsletter";
 import Footer from "@/components/Footer";
 import ScrollSmoother from "@/components/ScrollSmoother";
 import HeroSearch from "@/components/HeroSearch";
+import type { SearchData } from "@/lib/search/home-search";
 import WhatsAppButton from "@/components/WhatsAppButton";
 import type { Experience } from "@/components/landing-reserva/types";
 import { renderTemplate, siteConfig } from "@/lib/siteConfig";
@@ -128,6 +129,7 @@ interface HomeClientProps {
     | { tipo: "subtitle"; titulo: string }
   >;
   categoriasDestacadas: Categoria[];
+  searchData: SearchData;
   banners: BannerImage[];
   blogPosts: BlogPost[]; // BLOG OCULTO: se pasa [] desde page; descomentar BlogSection para usar
   experiencias: Experience[];
@@ -137,6 +139,7 @@ export default function HomeClient({
   paquetes,
   productosOrdenados,
   categoriasDestacadas,
+  searchData,
   banners,
   blogPosts,
   experiencias,
@@ -219,7 +222,7 @@ export default function HomeClient({
 
         <div className="relative z-10 container mx-auto flex min-h-[330px] items-center justify-center px-4 py-8 sm:min-h-[420px] sm:py-10 md:min-h-[580px] md:px-6 md:py-16 lg:min-h-[640px] lg:px-8 lg:py-20">
           <motion.div variants={fadeInUpVariants} className="w-full max-w-5xl mx-auto relative z-20">
-            <HeroSearch paquetes={paquetes} />
+            <HeroSearch data={searchData} />
             
             {/* Sombra sutil debajo del buscador para darle efecto de flotación 3D */}
             <div className="absolute -bottom-4 left-1/2 -z-10 h-9 w-[82%] -translate-x-1/2 rounded-[100%] bg-black/18 blur-xl sm:-bottom-5 sm:h-12 md:-bottom-6 md:h-14 md:w-[88%] md:blur-2xl" />

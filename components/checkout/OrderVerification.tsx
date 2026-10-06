@@ -3,24 +3,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Clock, Loader2, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { useTranslations } from '@/lib/messages';
 
 type ApiResponse =
   | { ok: true; order: any }
   | { error: string };
 
-function labelForStatus(statusRaw: unknown, initialPaymentApproved: boolean): string {
+function labelForStatus(statusRaw: unknown, initialPaymentApproved: boolean, translate: (key: string) => string): string {
   const s = String(statusRaw ?? '');
   if (initialPaymentApproved && (s === '' || s === 'created' || s === 'checkout_started' || s === 'pending')) {
-    return 'pago aprobado';
+    return translate('statusApproved');
   }
-  if (s === 'paid') return 'pagada';
-  if (s === 'pending') return 'pendiente';
-  if (s === 'cancelled') return 'cancelada';
-  if (s === 'failed') return 'fallida';
-  if (s === 'needs_review') return 'requiere revisión';
-  if (s === 'checkout_started') return 'procesando';
-  if (s === 'expired') return 'vencida';
-  return 'creada';
+  if (s === 'paid') return translate('statusPaid');
+  if (s === 'pending') return translate('statusPending');
+  if (s === 'cancelled') return translate('statusCancelled');
+  if (s === 'failed') return translate('statusFailed');
+  if (s === 'needs_review') return translate('statusReview');
+  if (s === 'checkout_started') return translate('statusProcessing');
+  if (s === 'expired') return translate('statusExpired');
+  return translate('statusCreated');
 }
 
 function badgeVariantForStatus(statusRaw: unknown, initialPaymentApproved: boolean): 'default' | 'secondary' | 'outline' | 'destructive' {
@@ -43,6 +44,7 @@ export default function OrderVerification({
   paymentId?: string;
   initialPaymentApproved?: boolean;
 }) {
+  const t = useTranslations('checkout');
   const [order, setOrder] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,7 +69,7 @@ export default function OrderVerification({
         const body = (await res.json().catch(() => null)) as ApiResponse | null;
         if (!active) return 'inactive';
         if (!res.ok) {
-          setError((body as any)?.error ?? 'No se pudo obtener el estado');
+          setError((body as any)?.error ?? t('statusUnavailable'));
           setLoading(false);
           return 'error';
         }
@@ -78,13 +80,13 @@ export default function OrderVerification({
           setLoading(false);
           return String(nextOrder?.status ?? '');
         } else {
-          setError((body as any)?.error ?? 'No se pudo obtener el estado');
+          setError((body as any)?.error ?? t('statusUnavailable'));
         }
         setLoading(false);
         return 'error';
       } catch (e) {
         if (!active) return 'inactive';
-        setError(e instanceof Error ? e.message : 'No se pudo obtener el estado');
+        setError(e instanceof Error ? e.message : t('statusUnavailable'));
         setLoading(false);
         return 'error';
       }
@@ -139,7 +141,7 @@ export default function OrderVerification({
   if (error) {
     return (
       <div className="mt-4 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">
-        No pudimos confirmar el estado automáticamente. Si en unos minutos no recibís el email, escribinos por WhatsApp.
+        {t('statusErrorDescription')}
       </div>
     );
   }
@@ -148,17 +150,18 @@ export default function OrderVerification({
     return (
       <div className="mt-4 flex items-center gap-2 rounded-lg border border-gray-100 bg-white p-3 text-sm text-gray-700">
         <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-        Verificando el estado del pago...
+        {t('checkingOrderStatus')}
       </div>
     );
   }
 
-  const status = labelForStatus(order?.status, initialPaymentApproved);
+  const status = labelForStatus(order?.status, initialPaymentApproved, (key) => t(key as never));
   const badgeVariant = badgeVariantForStatus(order?.status, initialPaymentApproved);
+  const rawStatus = String(order?.status ?? '');
   const icon =
-    status === 'pagada' || status === 'pago aprobado'
+    rawStatus === 'paid' || (initialPaymentApproved && !['failed', 'cancelled', 'needs_review'].includes(rawStatus))
       ? <CheckCircle2 className="h-4 w-4 text-success" />
-      : status === 'pendiente' || status === 'procesando'
+      : rawStatus === 'pending' || rawStatus === 'checkout_started'
       ? <Clock className="h-4 w-4 text-gray-500" />
       : <RotateCcw className="h-4 w-4 text-red-600" />;
 
@@ -167,7 +170,7 @@ export default function OrderVerification({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           {icon}
-          <span className="font-medium">Estado:</span>
+          <span className="font-medium">{t('status')}:</span>
           <Badge variant={badgeVariant} className="capitalize">
             {status}
           </Badge>

@@ -4,11 +4,13 @@ import { serializeFirestoreData } from '@/lib/utils/serialize';
 import { BannerImage, BlogPost, Categoria, Paquete } from '@/types';
 import { getExperiencias } from '@/lib/experiencias';
 import { getHomeBackgroundImageFallbackUrl } from '@/lib/siteConfig';
+import { toSearchEntry, type SearchData } from '@/lib/search/home-search';
 
 /** Límites para la home: evita traer más documentos de los necesarios y reduce memoria */
 const HOME_PAQUETES_LIMIT = 12;
 const HOME_EXPERIENCIAS_LIMIT = 12;
 const HOME_CATEGORIAS_LIMIT = 6;
+const SEARCH_PAQUETES_LIMIT = 500;
 
 async function fetchVisibleOrdered<T>(collectionName: string, maxItems: number) {
   try {
@@ -55,6 +57,34 @@ async function fetchFeaturedCategories(maxItems: number) {
   }
 }
 
+async function fetchActiveCategories(): Promise<Categoria[]> {
+  try {
+    const snapshot = await getDocs(
+      query(collection(db, 'categorias'), where('activa', '==', true), firestoreOrderBy('orden', 'asc'))
+    );
+    return snapshot.docs.map((doc) => serializeFirestoreData<Categoria>({ id: doc.id, ...doc.data() }));
+  } catch {
+    const snapshot = await getDocs(query(collection(db, 'categorias'), where('activa', '==', true)));
+    return snapshot.docs
+      .map((doc) => serializeFirestoreData<Categoria>({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  }
+}
+
+/** Datos del buscador: destinos = categorías activas de Firestore; experiencias = todos los paquetes visibles. */
+async function getSearchData(): Promise<SearchData> {
+  const [categorias, paquetes] = await Promise.all([
+    fetchActiveCategories(),
+    fetchVisibleOrdered<Paquete>('paquetes', SEARCH_PAQUETES_LIMIT),
+  ]);
+  return {
+    destinations: categorias.map((categoria) => ({ id: categoria.id, nombre: String(categoria.nombre ?? '') })),
+    entries: paquetes
+      .map((paquete) => toSearchEntry(paquete, categorias))
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+  };
+}
+
 export async function getHomeData() {
   const backgroundFallback = getHomeBackgroundImageFallbackUrl();
   const fallbackBannerUrl = backgroundFallback || '/images/hero-placeholder.svg';
@@ -67,6 +97,7 @@ export async function getHomeData() {
       blogPosts: [],
       experiencias: [],
       categoriasDestacadas: [],
+      searchData: { entries: [], destinations: [] } as SearchData,
     };
   }
   const [
@@ -76,6 +107,7 @@ export async function getHomeData() {
     seccionesSnapshot,
     experienciasData,
     categoriasDestacadas,
+    searchData,
   ] = await Promise.all([
     fetchVisibleOrdered<Paquete>('paquetes', HOME_PAQUETES_LIMIT),
     getDocs(query(collection(db, 'banners'), firestoreOrderBy('orden', 'asc'))),
@@ -83,6 +115,7 @@ export async function getHomeData() {
     getDocs(query(collection(db, 'secciones'), firestoreOrderBy('orden', 'asc'))),
     getExperiencias({ visibleOnly: true, limit: HOME_EXPERIENCIAS_LIMIT }),
     fetchFeaturedCategories(HOME_CATEGORIAS_LIMIT),
+    getSearchData(),
   ]);
 
   const seccionesData = seccionesSnapshot.docs
@@ -150,5 +183,6 @@ export async function getHomeData() {
     blogPosts: blogData,
     experiencias: experienciasData,
     categoriasDestacadas,
+    searchData,
   };
 }

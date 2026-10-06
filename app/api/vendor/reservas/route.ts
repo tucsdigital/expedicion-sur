@@ -4,7 +4,7 @@ import { adminAuth } from '@/lib/firebaseAdmin';
 import type { Auth } from 'firebase-admin/auth';
 import { db } from '@/lib/firebase';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
-import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { getPaqueteById } from '@/lib/paquetes';
 import { createReserva } from '@/lib/reservas';
 import { getStockDisponible, registrarMovimientoStock } from '@/lib/stock';
@@ -31,6 +31,12 @@ const travelerSchema = z.object({
   travelerType: z.enum(['adult', 'minor']).nullable().optional(),
 });
 
+const manualExtraSchema = z.object({
+  title: z.string().min(1).max(120),
+  price: z.number().min(0).max(999999999),
+  scope: z.enum(['per_booking', 'per_person']).optional(),
+});
+
 const bodySchema = z.object({
   packageId: z.string().min(1),
   date: z.string().min(1),
@@ -43,10 +49,9 @@ const bodySchema = z.object({
   customerBirthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   customerComments: z.string().max(500).optional(),
   passengerDetails: z.array(travelerSchema).max(49).optional(),
-  roomType: z.enum(['matrimonial', 'twin', 'full-day']).optional(),
-  pickupPoint: z.string().max(120).optional(),
-  pickupPointTime: z.string().max(20).nullable().optional(),
   selectedExtraCodes: z.array(z.enum(['cocheCama', 'panoramicos', 'cafeteras'])).max(10).optional(),
+  addonIds: z.array(z.string().min(1).max(80)).max(20).optional(),
+  manualExtras: z.array(manualExtraSchema).max(20).optional(),
   status: reservationStatusEnum.optional(),
 }).superRefine((data, ctx) => {
   const additionalTravelers = Math.max(0, data.people - 1);
@@ -59,15 +64,6 @@ const bodySchema = z.object({
     });
   }
 });
-
-function resolvePickupPointTime(paquete: any, pickupPoint: string, rawTime?: string | null): string | null {
-  const incoming = String(rawTime ?? '').trim();
-  if (incoming) return incoming;
-  const config = Array.isArray(paquete?.pickupPointsConfig) ? paquete.pickupPointsConfig : [];
-  const found = config.find((item: any) => String(item?.label ?? '').trim() === pickupPoint);
-  const time = found ? String(found?.time ?? '').trim() : '';
-  return time || null;
-}
 
 async function getVendorForUser(auth: Auth, request: Request) {
   const header = request.headers.get('authorization') ?? '';
@@ -153,10 +149,6 @@ export async function POST(request: Request) {
       }
     }
 
-    const pickupPoint = typeof payload.pickupPoint === 'string' ? payload.pickupPoint.trim() : '';
-    const pickupPointTime = pickupPoint
-      ? resolvePickupPointTime(paquete, pickupPoint, payload.pickupPointTime ?? null)
-      : null;
     const selectedExtraCodes = Array.isArray(payload.selectedExtraCodes)
       ? Array.from(new Set(payload.selectedExtraCodes.map((code) => String(code).trim()).filter(Boolean)))
       : [];
@@ -170,13 +162,21 @@ export async function POST(request: Request) {
     }
     const selectedExtras = resolveReservationExtraSelections({
       paquete,
-      pickupPoint: pickupPoint || null,
       selectedExtraCodes,
+      addonIds: Array.isArray((payload as any).addonIds)
+        ? (payload as any).addonIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
+        : [],
+      manualExtras: Array.isArray((payload as any).manualExtras)
+        ? (payload as any).manualExtras.map((extra: any) => ({
+            label: String(extra?.title ?? '').trim(),
+            amount: Math.max(0, Number(extra?.price ?? 0) || 0),
+            perPerson: String(extra?.scope ?? 'per_booking') === 'per_person',
+          }))
+        : [],
       seatLayoutTemplate: seatLayoutTemplateForExtras,
     });
     const repriced = computeReservationPricing(paquete, payload.date, {
       people: payload.people,
-      roomType: payload.roomType ?? null,
       selectedExtras,
     });
     const currency = (repriced.currency ?? 'ars').toLowerCase() as 'ars' | 'brl' | 'usd';
@@ -268,10 +268,7 @@ export async function POST(request: Request) {
         slug: packageSlug,
         title: paquete.titulo,
       },
-      pickupPoint: pickupPoint || null,
-      pickupPointTime,
-      roomType: payload.roomType ?? null,
-      selectedExtras: selectedExtras.length ? selectedExtras : null,
+      selectedExtras: selectedExtras.length ? (selectedExtras as any) : null,
       customerBirthDate: payload.customerBirthDate,
       passengerDetails: payload.passengerDetails ?? [],
       referredBy,
@@ -295,6 +292,75 @@ export async function POST(request: Request) {
     return NextResponse.json({ id: reservaId });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'No se pudo guardar la reserva';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  if (!adminAuth) {
+    return NextResponse.json(
+      {
+        error:
+          'Firebase Admin no está configurado. Define FIREBASE_SERVICE_ACCOUNT en .env.local con el JSON del Service Account.',
+      },
+      { status: 500 }
+    );
+  }
+  const AUTH = adminAuth as Auth;
+
+  let vendor;
+  try {
+    vendor = await getVendorForUser(AUTH, request);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Autenticación inválida';
+    return NextResponse.json({ error: msg }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const reservationId = body.reservationId;
+  if (!reservationId) {
+    return NextResponse.json({ error: 'reservationId obligatorio' }, { status: 400 });
+  }
+
+  const reservaSnap = await getDoc(doc(db, 'reservas', reservationId));
+  if (!reservaSnap.exists()) {
+    return NextResponse.json({ error: 'Reserva no encontrada' }, { status: 404 });
+  }
+  const reserva = reservaSnap.data() as any;
+  if (reserva.referredBy?.vendorId !== vendor.id) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  const updates: Record<string, any> = {
+    updatedAt: Timestamp.now(),
+  };
+  if (body.date !== undefined) updates.date = body.date;
+  if (body.customerName !== undefined) updates.customerName = body.customerName;
+  if (body.customerEmail !== undefined) updates.customerEmail = body.customerEmail;
+  if (body.customerPhone !== undefined) updates.customerPhone = body.customerPhone;
+  if (body.customerDocument !== undefined) updates.customerDocument = body.customerDocument;
+  if (body.customerBirthDate !== undefined) updates.customerBirthDate = body.customerBirthDate;
+  if (body.customerComments !== undefined) updates.customerComments = body.customerComments;
+  if (body.people !== undefined) updates.people = body.people;
+  if (body.peopleAdults !== undefined) updates.peopleAdults = body.peopleAdults;
+  if (body.peopleMinors !== undefined) updates.peopleMinors = body.peopleMinors;
+  if (body.selectedExtraCodes !== undefined) {
+    const paquete = await getPaqueteById(reserva.packageId ?? reserva.experienceId);
+    if (paquete) {
+      const extras = resolveReservationExtraSelections({
+        paquete,
+        selectedExtraCodes: body.selectedExtraCodes,
+      });
+      updates.selectedExtras = extras;
+      updates.extrasTotalAmount = extras.reduce((sum, e) => sum + e.amount, 0);
+    }
+  }
+
+  try {
+    await updateDoc(doc(db, 'reservas', reservationId), updates);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'No se pudo actualizar la reserva';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

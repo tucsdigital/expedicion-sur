@@ -4,6 +4,8 @@ import { normalizePackageCategoryIds } from '@/lib/packages/category-utils';
 import { extractGoogleMapsEmbedUrl } from '@/lib/packages/google-maps';
 import { normalizeExcursionTypeValue, normalizePackageTypes } from '@/lib/packages/package-types';
 import { normalizePeopleCategories } from '@/lib/packages/people-categories';
+import { DEFAULT_MIN_LEAD_HOURS, MAX_MIN_LEAD_HOURS } from '@/lib/packages/booking-rules';
+import { MAX_PACKAGE_ADDONS, packageAddonsSchema } from '@/lib/packages/package-addons';
 import {
   extractPlainTextFromRichText,
   hasMeaningfulRichText,
@@ -71,11 +73,13 @@ const peopleCategorySchema = z
   })
   .refine((data) => data.max >= data.min, { message: 'El máximo no puede ser menor al mínimo', path: ['max'] });
 
+const MAX_PEOPLE_PER_BOOKING = 50;
+
 export const packageAdminFormSchema = z.object({
   titulo: z.string().min(5, 'El titulo debe tener al menos 5 caracteres').max(100, 'El titulo no puede exceder 100 caracteres').transform((val) => val.trim()),
   descripcion: z.string().max(50000, 'La descripcion es demasiado larga').transform((val) => normalizeRichTextContent(val)),
   descripcionCorta: z.string().max(160, 'La descripcion corta no puede exceder 160 caracteres').optional().or(z.literal('')).transform((val) => val?.trim() || ''),
-  mostrarItinerario: z.boolean().transform((val) => Boolean(val)),
+  mostrarItinerario: z.boolean().optional(),
   itinerarioSteps: z.array(itineraryStepSchema).max(60, 'El itinerario tiene demasiados pasos').optional().default([]),
   mapaGoogleEmbedUrl: z
     .string()
@@ -96,7 +100,11 @@ export const packageAdminFormSchema = z.object({
   mostrarDesde: z.boolean().transform((val) => Boolean(val)),
   duracion: z.string().min(1, 'La duracion es requerida').max(50, 'La duracion no puede exceder 50 caracteres').transform((val) => val.trim()),
   reservasHabilitadas: z.boolean().transform((val) => Boolean(val)),
-  maxPersonasPorReserva: z.number().int('Debes ingresar un numero entero').min(1, 'Minimo 1 persona').max(50, 'Maximo 50 personas'),
+  minLeadHours: z
+    .number()
+    .int('Debes ingresar un numero entero')
+    .min(0, 'Minimo 0 horas (sin anticipacion minima)')
+    .max(MAX_MIN_LEAD_HOURS, `Maximo ${MAX_MIN_LEAD_HOURS} horas`),
   peopleCategories: z.array(peopleCategorySchema).max(10, 'Hay demasiadas categorias').optional().default([]),
   incluye: z.string().optional().default(''),
   visible: z.boolean().transform((val) => Boolean(val)),
@@ -133,17 +141,6 @@ export const packageAdminFormSchema = z.object({
     });
   }
 
-  const hasAnyStep = Array.isArray(data.itinerarioSteps) && data.itinerarioSteps.length > 0;
-  const hasMeaningfulSteps = (data.itinerarioSteps ?? []).some((step) => hasMeaningfulRichText(step.descripcion) || Boolean(step.titulo?.trim()));
-
-  if (data.mostrarItinerario && (!hasAnyStep || !hasMeaningfulSteps)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['itinerarioSteps'],
-      message: 'Debes cargar al menos un paso del itinerario si la visualizacion publica esta activada',
-    });
-  }
-
   if (!data.tarifaEspecialHabilitada) return;
 
   if (!data.tarifaEspecialPrecio || data.tarifaEspecialPrecio <= 0) {
@@ -162,7 +159,7 @@ export const packageAdminFormSchema = z.object({
     });
   }
 
-  const categories = normalizePeopleCategories(data.peopleCategories, data.maxPersonasPorReserva);
+  const categories = normalizePeopleCategories(data.peopleCategories, MAX_PEOPLE_PER_BOOKING);
   if (categories.length > 0) {
     const keys = categories.map((item) => item.key);
     if (new Set(keys).size !== keys.length) {
@@ -170,14 +167,6 @@ export const packageAdminFormSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ['peopleCategories'],
         message: 'No se permiten categorias duplicadas',
-      });
-    }
-    const sumMin = categories.reduce((acc, item) => acc + Math.max(0, Number(item.min) || 0), 0);
-    if (sumMin > data.maxPersonasPorReserva) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['peopleCategories'],
-        message: 'La suma de mínimos supera el máximo por reserva',
       });
     }
   }
@@ -195,7 +184,6 @@ export const packageAdminDefaultValues: PackageAdminFormData = {
   moneda: 'ARS',
   incluye: '',
   itinerarioSteps: [],
-  mostrarItinerario: false,
   mapaGoogleEmbedUrl: '',
   descripcionCorta: '',
   precio: 0,
@@ -203,7 +191,7 @@ export const packageAdminDefaultValues: PackageAdminFormData = {
   tarifaEspecialPrecio: 0,
   tarifaEspecialFechaLimite: '',
   reservasHabilitadas: true,
-  maxPersonasPorReserva: 6,
+  minLeadHours: DEFAULT_MIN_LEAD_HOURS,
   peopleCategories: [
     { key: 'adults', label: 'Adultos', min: 1, max: 6 },
     { key: 'minors', label: 'Menores', min: 0, max: 6 },
@@ -298,6 +286,15 @@ export function buildPackageAdminPayload(args: {
   tagItems: string[];
   noIncludeItems: string[];
   condicionesItems: CondicionItem[];
+  addons: Array<{
+    id: string;
+    title: string;
+    description: string;
+    price: number;
+    image: string;
+    imageKey?: string | null;
+    enabled: boolean;
+  }>;
   salidas: Salida[];
   fechaVencimiento: string;
   imageData: {
@@ -334,6 +331,7 @@ export function buildPackageAdminPayload(args: {
     selectedTransportes,
     noIncludeItems,
     condicionesItems,
+    addons,
     salidas,
     fechaVencimiento,
     imageData,
@@ -346,7 +344,7 @@ export function buildPackageAdminPayload(args: {
   const primaryTipo = normalizedTipos[0];
   const sanitizedSalidas = sanitizePackageSalidas(salidas);
   const bookingCurrency = data.moneda === 'USD' ? 'usd' : 'ars';
-  const peopleCategories = normalizePeopleCategories(data.peopleCategories, data.maxPersonasPorReserva);
+  const peopleCategories = normalizePeopleCategories(data.peopleCategories, MAX_PEOPLE_PER_BOOKING);
 
   const descripcionHtml = sanitizePackageRichHtml(data.descripcion);
   const itinerarioSteps = (data.itinerarioSteps ?? [])
@@ -371,7 +369,7 @@ export function buildPackageAdminPayload(args: {
     descripcionCorta: data.descripcionCorta?.trim() || '',
     itinerario: itinerarioLegacyHtml,
     itinerarioSteps,
-    mostrarItinerario: Boolean(data.mostrarItinerario),
+    mostrarItinerario: true,
     mapaGoogleEmbedUrl: data.mapaGoogleEmbedUrl?.trim() || '',
     destino: nombreCategoria,
     categoriaId: primaryCategoriaId,
@@ -392,8 +390,18 @@ export function buildPackageAdminPayload(args: {
       }))
       .filter((item) => item.titulo.length > 0 && item.texto.length > 0),
     salidas: sanitizedSalidas,
-    pickupPointsConfig: [],
-    pickupPoints: [],
+    addons: (Array.isArray(addons) ? addons : [])
+      .map((item) => ({
+        id: String((item as any)?.id ?? '').trim(),
+        title: String((item as any)?.title ?? '').trim(),
+        description: String((item as any)?.description ?? '').trim(),
+        price: Math.max(0, Number((item as any)?.price ?? 0) || 0),
+        image: String((item as any)?.image ?? '').trim(),
+        imageKey: String((item as any)?.imageKey ?? '').trim() || null,
+        enabled: (item as any)?.enabled !== false,
+      }))
+      .filter((item) => Boolean(item.id) && Boolean(item.title) && item.price > 0)
+      .slice(0, MAX_PACKAGE_ADDONS),
     seatSelectionEnabled: false,
     seatLayoutId: null,
     bookingConfig: {
@@ -409,7 +417,13 @@ export function buildPackageAdminPayload(args: {
         enabled: true,
         price: Math.max(0, Number(salida.precio ?? 0) || 0),
       })),
-      maxPeoplePerBooking: Math.max(1, Number(data.maxPersonasPorReserva) || 1),
+      maxPeoplePerBooking: Math.max(
+        1,
+        Math.min(MAX_PEOPLE_PER_BOOKING, peopleCategories.reduce((acc, item) => acc + Math.max(0, Number(item.max) || 0), 0))
+      ),
+      minLeadHours: Number.isFinite(Number(data.minLeadHours))
+        ? Math.max(0, Math.min(MAX_MIN_LEAD_HOURS, Math.floor(Number(data.minLeadHours))))
+        : DEFAULT_MIN_LEAD_HOURS,
       currency: bookingCurrency,
       depositAmount: Math.max(0, Number(existingBookingConfig?.depositAmount ?? 0) || 0),
       paymentMethods: {

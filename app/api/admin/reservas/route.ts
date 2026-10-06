@@ -18,7 +18,7 @@ import { buildBaseSeatReservationSeats, getSeatDepartureId, seatIdsFromLabels } 
 import {
   normalizeDigits,
   normalizeEmail,
-  reserveNextReservationCodeInTransaction,
+  reserveNextReservationCode,
 } from '@/lib/reservas/code';
 import type { SeatLayoutTemplate, SeatStatus } from '@/types';
 import { buildDefaultEmailDelivery } from '@/lib/sales/status';
@@ -73,6 +73,17 @@ const travelerSchema = z.object({
   travelerType: z.enum(['adult', 'minor']).nullable().optional(),
 });
 
+/**
+ * Adicional manual (creación/edición de reservas): título + precio los define
+ * el admin, sin depender del catálogo del paquete. Es lo que permite sumar
+ * un adicional creado para otra excursión.
+ */
+const manualExtraSchema = z.object({
+  title: z.string().min(1).max(120),
+  price: z.number().min(0).max(999999999),
+  scope: z.enum(['per_booking', 'per_person']).optional(),
+});
+
 const adminReservaSchema = z.object({
   packageId: z.string().min(1),
   date: z.string().min(1),
@@ -95,10 +106,9 @@ const adminReservaSchema = z.object({
   statusNote: z.string().max(500).optional(),
   vendorId: z.string().min(1).optional(),
   referralCode: z.string().max(60).optional(),
-  roomType: z.enum(['matrimonial', 'twin', 'full-day']).optional(),
-  pickupPoint: z.string().max(120).optional(),
-  pickupPointTime: z.string().max(20).nullable().optional(),
   selectedExtraCodes: z.array(z.enum(['cocheCama', 'panoramicos', 'cafeteras'])).max(10).optional(),
+  addonIds: z.array(z.string().min(1).max(80)).max(20).optional(),
+  manualExtras: z.array(manualExtraSchema).max(20).optional(),
   selectedSeats: z.array(z.string().min(1).max(20)).max(200).optional(),
 }).refine((data) => {
   const a = typeof data.peopleAdults === 'number' ? data.peopleAdults : 0;
@@ -142,6 +152,8 @@ const adminUpdateSchema = z.object({
   enqueueCustomerVoucherEmail: z.boolean().optional(),
   enqueueAdminNotificationEmail: z.boolean().optional(),
   addPaymentEvent: paymentMovementSchema.optional(),
+  /** Sumar un adicional existente a una venta ya creada (edición). */
+  addAddonExtra: manualExtraSchema.optional(),
 });
 
 function parseDate(value: unknown): string {
@@ -308,24 +320,13 @@ async function resolveReservationReferralAssignment(params: {
   return null;
 }
 
-function resolvePickupPointTime(paquete: Awaited<ReturnType<typeof getPaqueteById>> | null, pickupPoint: string, rawTime?: string | null): string | null {
-  const incoming = String(rawTime ?? '').trim();
-  if (incoming) return incoming;
-  const config = Array.isArray((paquete as any)?.pickupPointsConfig) ? (paquete as any).pickupPointsConfig : [];
-  const found = config.find((item: any) => String(item?.label ?? '').trim() === pickupPoint);
-  const time = found ? String(found?.time ?? '').trim() : '';
-  return time || null;
-}
-
 function computeVoucherNextAttemptAt(params: {
   date: string;
-  pickupPointTime?: string | null;
   now: Timestamp;
 }): Timestamp {
   const date = String(params.date ?? '').trim();
-  const time = String(params.pickupPointTime ?? '').trim();
   if (!date || date === 'sin-fecha') return params.now;
-  const hhmm = /^\d{2}:\d{2}$/.test(time) ? time : '09:00';
+  const hhmm = '09:00';
   const ts = new Date(`${date}T${hhmm}:00-03:00`).getTime();
   if (!Number.isFinite(ts) || ts <= 0) return params.now;
   const dueMs = ts - 48 * 60 * 60 * 1000;
@@ -366,8 +367,6 @@ async function enqueueReservationEmailJob(options: {
     customerPhone: reservation.customerPhone,
     customerCountry: reservation.customerCountry,
     customerComments: reservation.customerComments,
-    pickupPoint: (reservation as any).pickupPoint ?? null,
-    pickupPointTime: (reservation as any).pickupPointTime ?? null,
   };
 
   const now = Timestamp.now();
@@ -487,13 +486,6 @@ export async function POST(request: Request) {
       depositPercentAdults,
       depositPercentMinors,
     });
-    const pickupPoint = typeof payload.pickupPoint === 'string' ? payload.pickupPoint.trim() : '';
-    const pickupPointTimeRaw =
-      typeof payload.pickupPointTime === 'string' ? payload.pickupPointTime.trim() : '';
-    const resolvedPickupPointTime = pickupPoint
-      ? resolvePickupPointTime(paquete, pickupPoint, pickupPointTimeRaw || null)
-      : null;
-    const roomType = typeof payload.roomType === 'string' ? payload.roomType : null;
     const currency = (computedPricing.currency ?? 'ars').toLowerCase() as 'ars' | 'brl' | 'usd';
     const unitAmount = computedPricing.unitAmount;
     if (computedPricing.pricingMode === 'percent' && computedPricing.baseUnitAmount < 1) {
@@ -542,8 +534,17 @@ export async function POST(request: Request) {
     }
     const selectedExtras = resolveReservationExtraSelections({
       paquete,
-      pickupPoint: pickupPoint || null,
       selectedExtraCodes,
+      addonIds: Array.isArray((payload as any).addonIds)
+        ? (payload as any).addonIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
+        : [],
+      manualExtras: Array.isArray((payload as any).manualExtras)
+        ? (payload as any).manualExtras.map((extra: any) => ({
+            label: String(extra?.title ?? '').trim(),
+            amount: Math.max(0, Number(extra?.price ?? 0) || 0),
+            perPerson: String(extra?.scope ?? 'per_booking') === 'per_person',
+          }))
+        : [],
       seatLayoutTemplate: seatLayoutTemplateForExtras,
     });
     const repriced = computeReservationPricing(paquete, payload.date, {
@@ -552,7 +553,6 @@ export async function POST(request: Request) {
       peopleMinors,
       depositPercentAdults,
       depositPercentMinors,
-      roomType,
       selectedExtras,
     });
 
@@ -565,50 +565,65 @@ export async function POST(request: Request) {
       referralCode: payload.referralCode,
     });
 
+    // El código se reserva en su propia transacción ANTES: así la transacción
+    // principal solo hace sus lecturas primero y después sus escrituras
+    // (Firestore exige reads antes de writes).
+    let reservationCode: string;
+    try {
+      reservationCode = await reserveNextReservationCode();
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'No se pudo generar el código de reserva', detail: getErrorMessage(error) },
+        { status: 500 }
+      );
+    }
+
     const now = Timestamp.now();
     const status = payload.status ?? 'reserved';
     const reservaRef = doc(collection(db, COLLECTION));
     const stockRef = payload.date !== 'sin-fecha' ? doc(db, 'stockMovimientos', `admin_${reservaRef.id}`) : null;
+    const seatsNeeded = Boolean(seatsEnabled && seatLayoutId && payload.date !== 'sin-fecha');
+    const departureId = getSeatDepartureId(paquete.id, payload.date);
+    const seatResRef = doc(db, 'seatReservations', departureId);
 
     try {
       await runTransaction(db, async (tx) => {
+        // Todas las lecturas primero.
+        const templateSnap = seatsNeeded ? await tx.get(doc(db, 'seatLayouts', seatLayoutId)) : null;
+        const seatResSnap = seatsNeeded ? await tx.get(seatResRef) : null;
+
+        // A partir de acá, solo escrituras. El doc de stock usa id único
+        // (`admin_${reservaRef.id}`), así que se escribe directo sin leer.
         if (stockRef && status !== 'cancelled') {
-          const stockSnap = await tx.get(stockRef);
-          if (!stockSnap.exists()) {
-            tx.set(stockRef, {
-              packageId: paquete.id,
-              date: payload.date,
-              type: 'reserva',
-              quantity: -people,
-              author: adminUser?.email ?? 'admin',
-              referenceId: reservaRef.id,
-              note: payload.statusNote ?? `Reserva manual creada (${status})${allowOverbook ? ' · OVERBOOK' : ''}`,
-              baseCapacityAtThatTime: baseCapacity,
-              amountTotal: repriced.subtotalAmount,
-              currency,
-              createdAt: now,
-            });
-          }
+          tx.set(stockRef, {
+            packageId: paquete.id,
+            date: payload.date,
+            type: 'reserva',
+            quantity: -people,
+            author: adminUser?.email ?? 'admin',
+            referenceId: reservaRef.id,
+            note: payload.statusNote ?? `Reserva manual creada (${status})${allowOverbook ? ' · OVERBOOK' : ''}`,
+            baseCapacityAtThatTime: baseCapacity,
+            amountTotal: repriced.subtotalAmount,
+            currency,
+            createdAt: now,
+          });
         }
 
-        if (seatsEnabled && seatLayoutId && payload.date !== 'sin-fecha') {
-          const templateSnap = await tx.get(doc(db, 'seatLayouts', seatLayoutId));
-          if (!templateSnap.exists()) {
+        if (seatsNeeded) {
+          if (!templateSnap?.exists()) {
             throw new Error('Plantilla de micro no encontrada.');
           }
           const template = { id: templateSnap.id, ...(templateSnap.data() as any) } as SeatLayoutTemplate;
           const baseSeats = buildBaseSeatReservationSeats(template);
-          const departureId = getSeatDepartureId(paquete.id, payload.date);
-          const seatResRef = doc(db, 'seatReservations', departureId);
-          const seatResSnap = await tx.get(seatResRef);
-          const seatResData: any = seatResSnap.exists() ? seatResSnap.data() : null;
+          const seatResData: any = seatResSnap?.exists() ? seatResSnap.data() : null;
           const currentLayoutId = seatResData ? String(seatResData?.seatLayoutId ?? '') : '';
           const seatsMap: Record<string, any> =
-            seatResSnap.exists() && currentLayoutId === seatLayoutId
+            seatResSnap?.exists() && currentLayoutId === seatLayoutId
               ? { ...(seatResData?.seats ?? {}) }
               : { ...baseSeats };
 
-          if (!seatResSnap.exists() || currentLayoutId !== seatLayoutId) {
+          if (!seatResSnap?.exists() || currentLayoutId !== seatLayoutId) {
             tx.set(
               seatResRef,
               {
@@ -661,7 +676,6 @@ export async function POST(request: Request) {
             createdAt: now,
           })) ?? [];
 
-        const reservationCode = await reserveNextReservationCodeInTransaction(tx);
         const customerEmailLower = normalizeEmail(payload.customerEmail);
         const customerNameLower = String(payload.customerName ?? '').trim().toLowerCase() || null;
         const customerPhoneNormalized = normalizeDigits(payload.customerPhone);
@@ -688,9 +702,6 @@ export async function POST(request: Request) {
           depositPercentMinors: repriced.depositPercentMinors,
           baseSubtotalAmount: repriced.baseSubtotalAmount,
           extrasTotalAmount: repriced.extrasTotalAmount,
-          pickupPoint: pickupPoint || null,
-          pickupPointTime: resolvedPickupPointTime,
-          roomType,
           selectedExtras: selectedExtras.length ? selectedExtras : null,
           amountTotal: repriced.subtotalAmount,
           currency,
@@ -1008,8 +1019,7 @@ export async function PATCH(request: Request) {
         }).catch(() => null);
       } else if (paidAt && !voucherAlreadySent && customerEmail) {
         const now = Timestamp.now();
-        const pickupPointTime = (reservation as any).pickupPointTime ? String((reservation as any).pickupPointTime).trim() : null;
-        const nextAttemptAt = computeVoucherNextAttemptAt({ date: payload.date, pickupPointTime, now });
+        const nextAttemptAt = computeVoucherNextAttemptAt({ date: payload.date, now });
         const existingJobId = (reservation as any).emailDelivery?.customerVoucher?.jobId;
         const jobId = existingJobId ? String(existingJobId) : `${payload.reservationId}_cliente_voucher`;
         await enqueueReservationEmailJob({
@@ -1092,6 +1102,58 @@ export async function PATCH(request: Request) {
           createdAt: now,
         }),
       }).catch(() => null);
+    }
+
+    if (payload.addAddonExtra) {
+      // Sumar un adicional a una venta creada: se agrega a selectedExtras y
+      // se recalcula amountTotal para que el detalle muestre el nuevo total.
+      const title = String(payload.addAddonExtra.title ?? '').trim().slice(0, 120);
+      const price = Math.max(0, Number(payload.addAddonExtra.price ?? 0) || 0);
+      const perPerson = String(payload.addAddonExtra.scope ?? 'per_booking') === 'per_person';
+      if (!title || price <= 0) {
+        return NextResponse.json({ error: 'Adicional inválido.' }, { status: 400 });
+      }
+      const peopleCount = Math.max(1, Number(reservation.people ?? 1) || 1);
+      const extraInCents = Math.round(price * 100) * (perPerson ? peopleCount : 1);
+      const currentExtras = Array.isArray(reservation.selectedExtras) ? reservation.selectedExtras : [];
+      const nextExtras = [
+        ...currentExtras,
+        {
+          code: 'manualExtra',
+          label: title,
+          amount: extraInCents,
+          source: 'manualExtra',
+          scope: perPerson ? 'per_person' : 'per_booking',
+        },
+      ];
+      const nextTotal = Math.max(0, Number(reservation.amountTotal ?? 0) || 0) + extraInCents;
+      const nowAddon = Timestamp.now();
+      await updateDoc(doc(db, COLLECTION, payload.reservationId), {
+        selectedExtras: nextExtras,
+        amountTotal: nextTotal,
+        updatedAt: nowAddon,
+        statusHistory: arrayUnion({
+          status: reservation.status,
+          actor: 'admin',
+          note: `Adicional sumado: ${title}`,
+          createdAt: nowAddon,
+        }),
+      });
+      const paymentRef = doc(collection(db, COLLECTION, payload.reservationId, 'payments'), `manual_${randomUUID()}`);
+      await setDoc(paymentRef, {
+        method: 'admin',
+        movementType: 'extra',
+        source: 'manual',
+        status: 'recorded',
+        amount: extraInCents,
+        currency: String(reservation.currency || 'ars').toLowerCase(),
+        message: `Adicional sumado: ${title}`,
+        reference: null,
+        recordedBy: adminUser?.email ?? 'admin',
+        occurredAt: nowAddon,
+        createdAt: nowAddon,
+        updatedAt: nowAddon,
+      });
     }
 
     if (payload.enqueueCustomerVoucherEmail) {

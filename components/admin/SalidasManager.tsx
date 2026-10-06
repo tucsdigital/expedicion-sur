@@ -57,6 +57,7 @@ function makeSalida(draft: Draft, fecha: string, id?: string): Salida {
 }
 
 export default function SalidasManager({ salidas, onSalidasChange }: Props) {
+  const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
   const today = toIso(new Date());
   const [month, setMonth] = useState(() => {
     const date = new Date();
@@ -66,9 +67,19 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
   const [rangeEnd, setRangeEnd] = useState('');
   const [draft, setDraft] = useState<Draft>({ ...EMPTY_DRAFT });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
 
   const datesByIso = useMemo(() => new Set(salidas.map((salida) => salida.fecha)), [salidas]);
   const sortedSalidas = useMemo(() => [...salidas].sort((a, b) => a.fecha.localeCompare(b.fecha)), [salidas]);
+  const totalPages = Math.max(1, Math.ceil(sortedSalidas.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedSalidas = useMemo(
+    () => sortedSalidas.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [currentPage, pageSize, sortedSalidas]
+  );
+  const firstVisible = sortedSalidas.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const lastVisible = Math.min(currentPage * pageSize, sortedSalidas.length);
   const calendarDays = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
@@ -123,6 +134,7 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
       return;
     }
     onSalidasChange(next);
+    setPage(1);
     setRangeStart('');
     setRangeEnd('');
     toast.success(`${added} fecha${added === 1 ? '' : 's'} agregada${added === 1 ? '' : 's'}.`);
@@ -162,6 +174,7 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
   const removeSalida = (id: string) => {
     onSalidasChange(salidas.filter((salida) => salida.id !== id));
     if (editingId === id) resetEditor();
+    if (currentPage > 1 && paginatedSalidas.length === 1) setPage((value) => Math.max(1, value - 1));
     toast.success('Salida eliminada.');
   };
 
@@ -216,9 +229,87 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
         </div>
       )}
 
-      <div className="border-t border-gray-200 pt-4">
-        <div className="flex items-center justify-between"><p className="text-sm font-semibold text-gray-900">Salidas configuradas</p><span className="text-xs text-gray-500">{sortedSalidas.length} {sortedSalidas.length === 1 ? 'fecha' : 'fechas'}</span></div>
-        {sortedSalidas.length === 0 ? <div className="mt-3 flex items-center gap-3 rounded-lg border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500"><CalendarDays className="h-5 w-5 text-gray-400" />Todavía no hay fechas cargadas.</div> : <div className="mt-3 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">{sortedSalidas.map((salida) => <div key={salida.id} className="flex items-center justify-between gap-3 px-3 py-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-900"><span>{formatDate(salida.fecha, true)}</span>{salida.fechaVuelta && salida.fechaVuelta !== salida.fecha ? <span className="text-gray-400">hasta {formatDate(salida.fechaVuelta)}</span> : null}</div><div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500"><span>{salida.moneda} {Number(salida.precio || 0).toLocaleString('es-AR')}</span>{salida.cupo ? <span>{salida.cupo} cupos</span> : null}{salida.ciudadSalida ? <span>{salida.ciudadSalida}</span> : null}</div></div><div className="flex shrink-0 gap-1"><Button type="button" variant="ghost" size="icon" onClick={() => editSalida(salida)} disabled={Boolean(editingId)} aria-label="Editar salida"><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" onClick={() => removeSalida(salida.id)} disabled={Boolean(editingId)} aria-label="Eliminar salida"><Trash2 className="h-4 w-4 text-red-500" /></Button></div></div>)}</div>}
+      <div className="border-t border-gray-200 pt-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Salidas configuradas</p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {sortedSalidas.length} {sortedSalidas.length === 1 ? 'fecha cargada' : 'fechas cargadas'}
+            </p>
+          </div>
+          {sortedSalidas.length > 0 ? (
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <span>Mostrar</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(value) => {
+                  setPageSize(Number(value));
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-8 w-[76px] bg-white text-xs" aria-label="Cantidad de salidas por página">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={String(option)}>{option}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span>por página</span>
+            </div>
+          ) : null}
+        </div>
+
+        {sortedSalidas.length === 0 ? (
+          <div className="mt-3 flex items-center gap-3 rounded-xl border border-dashed border-gray-200 px-4 py-5 text-sm text-gray-500">
+            <CalendarDays className="h-5 w-5 text-gray-400" />
+            Todavía no hay fechas cargadas.
+          </div>
+        ) : (
+          <>
+            <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+              {paginatedSalidas.map((salida) => (
+                <div key={salida.id} className="flex items-center justify-between gap-3 px-3 py-3 transition-colors hover:bg-gray-50/80 sm:px-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-gray-900">
+                      <span>{formatDate(salida.fecha, true)}</span>
+                      {salida.fechaVuelta && salida.fechaVuelta !== salida.fecha ? <span className="text-gray-400">hasta {formatDate(salida.fechaVuelta)}</span> : null}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{salida.moneda} {Number(salida.precio || 0).toLocaleString('es-AR')}</span>
+                      {salida.cupo ? <span>{salida.cupo} cupos</span> : null}
+                      {salida.ciudadSalida ? <span className="truncate">{salida.ciudadSalida}</span> : null}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button type="button" variant="ghost" size="icon" onClick={() => editSalida(salida)} disabled={Boolean(editingId)} aria-label={`Editar salida ${formatDate(salida.fecha)}`}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button type="button" variant="ghost" size="icon" onClick={() => removeSalida(salida.id)} disabled={Boolean(editingId)} aria-label={`Eliminar salida ${formatDate(salida.fecha)}`}>
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {totalPages > 1 ? (
+              <div className="mt-3 flex flex-col gap-3 text-xs text-gray-500 sm:flex-row sm:items-center sm:justify-between">
+                <span>Mostrando {firstVisible}–{lastVisible} de {sortedSalidas.length}</span>
+                <div className="flex items-center gap-1">
+                  <Button type="button" variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1} aria-label="Página anterior">
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="min-w-20 text-center font-medium text-gray-700">Página {currentPage} de {totalPages}</span>
+                  <Button type="button" variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={currentPage === totalPages} aria-label="Página siguiente">
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );

@@ -88,7 +88,6 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
           setValue('titulo', data.titulo);
           setValue('descripcion', data.descripcionLarga || data.descripcion);
           setValue('descripcionCorta', data.descripcionCorta || '');
-          setValue('mostrarItinerario', Boolean(data.mostrarItinerario));
           setValue(
             'itinerarioSteps',
             Array.isArray((data as any).itinerarioSteps) && (data as any).itinerarioSteps.length > 0
@@ -109,7 +108,12 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
           setValue('duracion', data.duracion);
           setValue('reservasHabilitadas', data.bookingConfig?.enabled !== false);
           const maxPersonas = data.bookingConfig?.maxPeoplePerBooking ?? data.capacidadMaxima ?? 6;
-          setValue('maxPersonasPorReserva', maxPersonas);
+          setValue(
+            'minLeadHours',
+            typeof (data.bookingConfig as any)?.minLeadHours === 'number'
+              ? Math.max(0, Math.floor(Number((data.bookingConfig as any).minLeadHours)))
+              : 48
+          );
           setValue('peopleCategories', normalizePeopleCategories((data.bookingConfig as any)?.peopleCategories, maxPersonas));
           setValue('visible', data.visible);
           setValue('destacado', data.destacado);
@@ -301,6 +305,7 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
           tagItems: editor.tagItems,
           noIncludeItems: editor.noIncludeItems,
           condicionesItems: editor.condicionesItems,
+          addons: editor.addons,
           salidas: editor.salidas,
           fechaVencimiento: editor.fechaVencimiento,
           imageData: {
@@ -326,6 +331,38 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
               },
         }),
       };
+
+      // Subir imágenes nuevas de adicionales (dataURL) y reinyectar URLs finales
+      const dataUrlAddons = editor.addons.filter((addon) => addon.image.startsWith('data:'));
+      if (dataUrlAddons.length > 0) {
+        toast.info('Subiendo imágenes de adicionales...', { id: 'upload-addons' });
+        const addonFiles = dataUrlAddons.map((addon, index) =>
+          dataURLtoFile(addon.image, `paquete-addon-${Date.now()}-${index}.jpg`)
+        );
+        const addonResults = await uploadMultipleImages(addonFiles);
+        const urlById = new Map<string, { url: string; key: string }>();
+        dataUrlAddons.forEach((addon, index) => {
+          const result = addonResults[index];
+          if (result) urlById.set(addon.id, result);
+        });
+        (sanitizedData as any).addons = ((sanitizedData as any).addons ?? []).map((addon: any) => {
+          const uploaded = urlById.get(String(addon?.id ?? ''));
+          return uploaded ? { ...addon, image: uploaded.url, imageKey: uploaded.key } : addon;
+        });
+        toast.success('Imágenes de adicionales actualizadas', { id: 'upload-addons' });
+      }
+
+      // Borrar blobs de adicionales eliminados o reemplazados
+      const previousAddons = Array.isArray((currentPackage as any)?.addons) ? ((currentPackage as any).addons as any[]) : [];
+      const finalAddonKeySet = new Set(
+        (((sanitizedData as any).addons ?? []) as any[])
+          .map((addon: any) => String(addon?.imageKey ?? '').trim())
+          .filter(Boolean)
+      );
+      previousAddons.forEach((addon: any) => {
+        const prevKey = String(addon?.imageKey ?? getBlobKeyFromUrl(String(addon?.image ?? '')) ?? '').trim();
+        if (prevKey && !finalAddonKeySet.has(prevKey)) keysToDelete.add(prevKey);
+      });
 
       await updateDoc(doc(db, 'paquetes', id), sanitizedData);
       const slugNew = slugify(data.titulo);
@@ -407,6 +444,8 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
             onNoIncludeItemsChange={editor.setNoIncludeItems}
             condicionesItems={editor.condicionesItems}
             onCondicionesItemsChange={editor.setCondicionesItems}
+            addons={editor.addons}
+            onAddonsChange={editor.setAddons}
             salidas={editor.salidas}
             onSalidasChange={editor.setSalidas}
             imagenTarjetaPreview={editor.imagenTarjetaPreview}

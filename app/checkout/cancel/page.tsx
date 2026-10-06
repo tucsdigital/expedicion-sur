@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { XCircle, MessageCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 import { SITE_NAME, SOCIAL_MEDIA } from '@/lib/constants';
+import { getLocale, getTranslations } from '@/lib/messages';
 
 type SearchParams = Promise<{ slug?: string; date?: string; people?: string }>;
 
@@ -11,6 +12,9 @@ export default async function CheckoutCancelPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
+  const locale = await getLocale();
+  const t = await getTranslations('checkout');
+  const p = await getTranslations('public');
   const slug = params.slug?.trim() || '';
   const whatsappHref = `${SOCIAL_MEDIA.whatsapp}?text=${encodeURIComponent(
     'Hola, estaba por reservar una excursión y cancelé el pago. ¿Me pueden ayudar con alguna duda?'
@@ -26,28 +30,28 @@ export default async function CheckoutCancelPage({
                 <XCircle className="h-12 w-12" strokeWidth={2} />
               </div>
               <h1 className="mt-6 text-2xl font-bold text-gray-900 md:text-3xl">
-                Pago no realizado
+                {t('paymentNotCompleted')}
               </h1>
               <p className="mt-3 text-base text-gray-600">
-                No se realizó ningún cargo. Si fue por error o tenés dudas sobre el pago, podés volver a intentar o escribirnos por WhatsApp y te ayudamos.
+                {t('paymentNotCompletedDescription')}
               </p>
             </div>
 
             <div className="mt-8 space-y-4">
               <p className="text-center text-sm font-medium text-gray-700">
-                Opciones
+                {t('options')}
               </p>
               <ul className="space-y-3 text-sm text-gray-600">
                 <li className="flex items-start gap-3">
                   <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                   <span>
-                    Volvé a la excursión y elegí de nuevo la fecha y el método de pago para intentar otra vez.
+                    {t('tryAgainDescription')}
                   </span>
                 </li>
                 <li className="flex items-start gap-3">
                   <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-success" />
                   <span>
-                    Si algo no funcionó o tenés consultas, escribinos por WhatsApp. Te respondemos a la brevedad.
+                    {t('whatsAppHelpDescription')}
                   </span>
                 </li>
               </ul>
@@ -58,7 +62,7 @@ export default async function CheckoutCancelPage({
                 <Button asChild className="w-full justify-center gap-2 sm:w-auto">
                   <Link href={`/experiencia/${slug}`}>
                     <ArrowLeft className="h-4 w-4" />
-                    Volver a la excursión
+                    {t('backToExcursion')}
                   </Link>
                 </Button>
               )}
@@ -69,11 +73,11 @@ export default async function CheckoutCancelPage({
               >
                 <Link href={whatsappHref} target="_blank" rel="noopener noreferrer">
                   <MessageCircle className="h-4 w-4" />
-                  Escribir por WhatsApp
+                  {p('contactWhatsApp')}
                 </Link>
               </Button>
               <Button asChild variant="outline" className="w-full justify-center sm:w-auto">
-                <Link href="/">Ir al inicio</Link>
+                <Link href={'/'}>{t('goHome')}</Link>
               </Button>
             </div>
           </div>

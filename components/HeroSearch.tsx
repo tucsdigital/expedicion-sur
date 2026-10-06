@@ -1,250 +1,341 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MapPin, Calendar, X } from "lucide-react";
-import { Paquete } from "@/types";
-import { Button } from "@/components/ui/button";
+import { Calendar, Check, ChevronDown, Compass, MapPin, Search, X, type LucideIcon } from "lucide-react";
+import {
+  buildSearchHref,
+  buildSearchIndex,
+  findExperience,
+  formatMonthLabel,
+  getAvailableMonths,
+  getExperiences,
+  normalizeSearchText,
+  type SearchData,
+} from "@/lib/search/home-search";
 
 interface HeroSearchProps {
-  paquetes: Paquete[];
+  data: SearchData;
 }
 
-export default function HeroSearch({ paquetes }: HeroSearchProps) {
-  const router = useRouter();
-  const suggestionsListId = "hero-search-suggestions";
-  const [q, setQ] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const [mes, setMes] = useState("");
-  
-  // Para evitar que q y selectedSlug viajen juntos si no tienen sentido
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const [selectedDestino, setSelectedDestino] = useState<string | null>(null);
+type Option = { value: string; label: string; hint?: string };
 
+type FieldProps = {
+  label: string;
+  icon: LucideIcon;
+  placeholder: string;
+  options: Option[];
+  value: string;
+  onChange: (value: string) => void;
+  searchable?: boolean;
+  allLabel?: string;
+  emptyText: string;
+};
+
+function Field({
+  label,
+  icon: Icon,
+  placeholder,
+  options,
+  value,
+  onChange,
+  searchable = true,
+  allLabel,
+  emptyText,
+}: FieldProps) {
+  const baseId = useId();
+  const listId = `${baseId}-list`;
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+
+  const selected = options.find((option) => option.value === value) ?? null;
+
+  const visible = useMemo(() => {
+    const term = normalizeSearchText(query);
+    const filtered = term
+      ? options.filter((option) => normalizeSearchText(`${option.label} ${option.hint ?? ""}`).includes(term))
+      : options;
+    return allLabel && !term ? [{ value: "", label: allLabel }, ...filtered] : filtered;
+  }, [allLabel, options, query]);
 
   useEffect(() => {
-    const handler = setTimeout(() => setDebouncedQ(q), 200);
-    return () => clearTimeout(handler);
-  }, [q]);
-
-  // Click outside to close suggestions
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setShowSuggestions(false);
+        setOpen(false);
+        setQuery("");
       }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const mesesDisponibles = useMemo(() => {
-    const setMeses = new Set<string>();
-    paquetes.forEach(p => {
-      p.salidas?.forEach(s => {
-        if (s.fecha) {
-          const yyyyMm = s.fecha.substring(0, 7);
-          setMeses.add(yyyyMm);
-        }
-      });
-    });
-    return Array.from(setMeses).sort();
-  }, [paquetes]);
-
-  const formatMes = (yyyyMm: string) => {
-    const [y, m] = yyyyMm.split("-");
-    const date = new Date(parseInt(y), parseInt(m) - 1);
-    return date.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
-  };
-
-  const suggestions = useMemo(() => {
-    if (!debouncedQ.trim()) return { destinos: [], paquetes: [] };
-    const term = debouncedQ.toLowerCase().trim();
-    
-    const matchedDestinos = new Set<string>();
-    const matchedPaquetes: { titulo: string; slug: string; destino: string }[] = [];
-
-    paquetes.forEach(p => {
-      const isMatch = p.titulo.toLowerCase().includes(term) || (p.destino && p.destino.toLowerCase().includes(term));
-      if (isMatch) {
-        if (p.destino && p.destino.toLowerCase().includes(term)) {
-          matchedDestinos.add(p.destino);
-        }
-        if (p.titulo.toLowerCase().includes(term)) {
-          matchedPaquetes.push({ titulo: p.titulo, slug: p.slug, destino: p.destino || "" });
-        }
-      }
-    });
-
-    return {
-      destinos: Array.from(matchedDestinos).slice(0, 4),
-      paquetes: matchedPaquetes.slice(0, 6)
     };
-  }, [debouncedQ, paquetes]);
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
 
-  const totalSuggestions = suggestions.destinos.length + suggestions.paquetes.length;
+  const openList = () => {
+    setActive(Math.max(0, visible.findIndex((option) => option.value === value)));
+    setOpen(true);
+    if (searchable) inputRef.current?.focus();
+    else buttonRef.current?.focus();
+  };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!showSuggestions) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIndex(prev => (prev < totalSuggestions - 1 ? prev + 1 : prev));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIndex(prev => (prev > 0 ? prev - 1 : 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (activeIndex >= 0) {
-        selectSuggestion(activeIndex);
-      } else {
-        handleSearch();
+  const choose = (option: Option) => {
+    onChange(option.value);
+    setOpen(false);
+    setQuery("");
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!open) return openList();
+      setActive((current) => Math.min(visible.length - 1, current + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive((current) => Math.max(0, current - 1));
+    } else if (event.key === "Enter") {
+      if (open && visible[active]) {
+        event.preventDefault();
+        choose(visible[active]);
+      } else if (!open) {
+        event.preventDefault();
+        openList();
       }
-    } else if (e.key === "Escape") {
-      setShowSuggestions(false);
+    } else if (event.key === "Escape") {
+      setOpen(false);
+      setQuery("");
     }
   };
 
-  const selectSuggestion = (index: number) => {
-    const destLen = suggestions.destinos.length;
-    if (index < destLen) {
-      const dest = suggestions.destinos[index];
-      setQ(dest);
-      setSelectedDestino(dest);
-      setSelectedSlug(null);
-    } else {
-      const paq = suggestions.paquetes[index - destLen];
-      setQ(paq.titulo);
-      setSelectedSlug(paq.slug);
-      setSelectedDestino(null);
-    }
-    setShowSuggestions(false);
+  useEffect(() => {
+    if (!open) return;
+    document.getElementById(`${baseId}-opt-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, baseId, open]);
+
+  const showValue = Boolean(selected) && !open;
+  const displayText = selected && !open ? selected.label : "";
+
+  return (
+    <div ref={containerRef} className="relative min-w-0 flex-1">
+      <div
+        role="presentation"
+        onClick={() => (open ? undefined : openList())}
+        className={`group flex h-full min-h-[64px] cursor-pointer items-center gap-3 rounded-2xl px-4 py-2.5 transition-colors md:rounded-full md:px-6 ${
+          open ? "bg-[#F7F3ED]" : "hover:bg-[#F7F3ED]/70"
+        }`}
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#111111] text-[#CBBBA0] transition-colors group-hover:bg-[#E30613]">
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1 text-left">
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">{label}</div>
+          {searchable ? (
+            <input
+              ref={inputRef}
+              type="text"
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={open ? `${baseId}-opt-${active}` : undefined}
+              aria-label={label}
+              value={open ? query : displayText}
+              placeholder={placeholder}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActive(0);
+                setOpen(true);
+              }}
+              onFocus={() => !open && openList()}
+              onKeyDown={onKeyDown}
+              autoComplete="off"
+              className={`w-full truncate bg-transparent text-[15px] font-semibold outline-none placeholder:font-medium ${
+                showValue ? "text-[#111111]" : "text-[#111111] placeholder:text-neutral-400"
+              }`}
+            />
+          ) : (
+            <button
+              ref={buttonRef}
+              type="button"
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={listId}
+              aria-haspopup="listbox"
+              aria-label={label}
+              aria-activedescendant={open ? `${baseId}-opt-${active}` : undefined}
+              onKeyDown={onKeyDown}
+              className="block w-full truncate text-left text-[15px] font-semibold outline-none"
+            >
+              <span className={selected ? "text-[#111111]" : "font-medium text-neutral-400"}>
+                {selected ? selected.label : placeholder}
+              </span>
+            </button>
+          )}
+        </div>
+        {value ? (
+          <button
+            type="button"
+            aria-label={`Quitar ${label.toLowerCase()}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onChange("");
+              setQuery("");
+            }}
+            className="rounded-full p-1.5 text-neutral-400 transition hover:bg-black/5 hover:text-neutral-700"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <ChevronDown className={`h-4 w-4 shrink-0 text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        )}
+      </div>
+
+      {open ? (
+        <div
+          id={listId}
+          role="listbox"
+          aria-label={label}
+          className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 min-w-[260px] overflow-y-auto rounded-2xl border border-black/5 bg-white p-1.5 shadow-[0_24px_60px_rgba(17,17,17,0.18)] md:right-auto md:w-[22rem]"
+        >
+          {visible.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-neutral-500">{emptyText}</div>
+          ) : (
+            visible.map((option, index) => {
+              const isSelected = option.value === value;
+              return (
+                <div
+                  key={`${option.value}-${index}`}
+                  id={`${baseId}-opt-${index}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setActive(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(option)}
+                  className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 text-sm transition-colors ${
+                    index === active ? "bg-[#F7F3ED]" : ""
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className={`truncate ${isSelected ? "font-bold" : "font-semibold"} text-[#111111]`}>{option.label}</div>
+                    {option.hint ? <div className="truncate text-xs text-neutral-500">{option.hint}</div> : null}
+                  </div>
+                  {isSelected ? <Check className="h-4 w-4 shrink-0 text-[#E30613]" /> : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function HeroSearch({ data }: HeroSearchProps) {
+  const router = useRouter();
+  const [destino, setDestino] = useState("");
+  const [slug, setSlug] = useState("");
+  const [mes, setMes] = useState("");
+
+  const index = useMemo(() => buildSearchIndex(data.entries, data.destinations), [data]);
+
+  const destinationOptions = useMemo<Option[]>(
+    () =>
+      index.destinations.map((item) => ({
+        value: item.id,
+        label: item.label,
+        hint: `${item.count} ${item.count === 1 ? "experiencia" : "experiencias"}`,
+      })),
+    [index]
+  );
+
+  const destinationLabels = useMemo(() => new Map(index.destinations.map((item) => [item.id, item.label])), [index]);
+
+  const experienceOptions = useMemo<Option[]>(
+    () =>
+      getExperiences(index, destino).map((item) => ({
+        value: item.slug,
+        label: item.title,
+        hint: item.destinationIds.map((id) => destinationLabels.get(id)).filter(Boolean).join(' · ') || undefined,
+      })),
+    [destino, destinationLabels, index]
+  );
+
+  const monthOptions = useMemo<Option[]>(
+    () => getAvailableMonths(index, destino, slug).map((month) => ({ value: month, label: formatMonthLabel(month) })),
+    [destino, index, slug]
+  );
+
+  const handleDestinoChange = (next: string) => {
+    const current = slug ? findExperience(index, slug) : null;
+    const keepSlug = !next || !current || current.destinationIds.includes(next);
+    const nextSlug = keepSlug ? slug : "";
+    setDestino(next);
+    setSlug(nextSlug);
+    if (mes && !getAvailableMonths(index, next, nextSlug).includes(mes)) setMes("");
+  };
+
+  const handleExperienceChange = (nextSlug: string) => {
+    const experience = nextSlug ? findExperience(index, nextSlug) : null;
+    const nextDestino =
+      !experience || experience.destinationIds.length === 0 || experience.destinationIds.includes(destino)
+        ? destino
+        : experience.destinationIds[0];
+    setSlug(nextSlug);
+    setDestino(nextDestino);
+    if (mes && !getAvailableMonths(index, nextDestino, nextSlug).includes(mes)) setMes("");
   };
 
   const handleSearch = () => {
-    const params = new URLSearchParams();
-    if (selectedSlug) {
-      params.set("slug", selectedSlug);
-    } else if (selectedDestino) {
-      params.set("destino", selectedDestino);
-    } else if (q.trim()) {
-      params.set("q", q.trim());
-    }
-    
-    if (mes) {
-      params.set("mes", mes);
-    }
-
-    router.push(params.toString() ? `/experiencias?${params.toString()}` : "/experiencias");
+    const destinationLabel = index.destinations.find((item) => item.id === destino)?.label;
+    router.push(buildSearchHref({ slug, destinationLabel, month: mes }));
   };
 
   return (
-    <div className="relative mx-auto w-full max-w-4xl rounded-[20px] bg-white p-1.5 shadow-xl text-gray-800 md:rounded-2xl md:p-4" ref={containerRef}>
-      <div className="flex flex-col gap-1.5 md:flex-row md:gap-3">
-        {/* Input Buscador */}
-        <div className="relative flex-1">
-          <div className="flex items-center rounded-[15px] border border-transparent bg-gray-50 px-3 py-2 transition-colors focus-within:border-primary focus-within:bg-white md:rounded-xl md:px-4 md:py-3">
-            <Search className="mr-2 h-3.5 w-3.5 text-gray-400 md:mr-3 md:h-5 md:w-5" />
-            <input 
-              type="text"
-              placeholder="¿A dónde quieres viajar?"
-              className="w-full bg-transparent text-[12px] text-gray-700 outline-none placeholder:text-[12px] placeholder:text-gray-400 md:text-base md:placeholder:text-base"
-              value={q}
-              onChange={e => {
-                setQ(e.target.value);
-                setSelectedSlug(null);
-                setSelectedDestino(null);
-                setShowSuggestions(true);
-              }}
-              onFocus={() => setShowSuggestions(true)}
-              onKeyDown={handleKeyDown}
-              role="combobox"
-              aria-expanded={showSuggestions}
-              aria-controls={suggestionsListId}
-              aria-autocomplete="list"
-            />
-            {q && (
-              <button onClick={() => { setQ(""); setSelectedSlug(null); setSelectedDestino(null); }} className="rounded-full p-1 hover:bg-gray-200">
-                <X className="h-3.5 w-3.5 text-gray-500" />
-              </button>
-            )}
-          </div>
-
-          {/* Autocomplete Dropdown */}
-          {showSuggestions && (debouncedQ.trim().length > 0) && totalSuggestions > 0 && (
-            <div
-              id={suggestionsListId}
-              role="listbox"
-              className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-[16px] border border-gray-100 bg-white shadow-2xl md:mt-2 md:rounded-xl"
-            >
-              {suggestions.destinos.length > 0 && (
-                <div className="py-2">
-                  <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 md:text-xs">Destinos</div>
-                  {suggestions.destinos.map((dest, idx) => (
-                    <div 
-                      key={`dest-${idx}`}
-                      className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 text-[12px] ${activeIndex === idx ? "bg-gray-50" : "hover:bg-gray-50"} md:gap-3 md:px-4 md:text-base`}
-                      onClick={() => selectSuggestion(idx)}
-                    >
-                      <MapPin className="h-3.5 w-3.5 text-primary md:h-4 md:w-4" />
-                      <span>{dest}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {suggestions.paquetes.length > 0 && (
-                <div className="py-2 border-t border-gray-50">
-                  <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 md:text-xs">Excursiones</div>
-                  {suggestions.paquetes.map((paq, idx) => {
-                    const globalIdx = suggestions.destinos.length + idx;
-                    return (
-                      <div 
-                        key={`paq-${idx}`}
-                        className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 ${activeIndex === globalIdx ? "bg-gray-50" : "hover:bg-gray-50"} md:gap-3 md:px-4`}
-                        onClick={() => selectSuggestion(globalIdx)}
-                      >
-                        <Search className="h-3.5 w-3.5 text-gray-400 md:h-4 md:w-4" />
-                        <div>
-                          <div className="text-[12px] font-medium md:text-base">{paq.titulo}</div>
-                          {paq.destino && <div className="text-[11px] text-gray-500 md:text-xs">{paq.destino}</div>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Selector de Mes */}
-        <div className="relative w-full md:w-56">
-          <div className="flex h-full items-center rounded-[15px] border border-transparent bg-gray-50 px-3 py-2 transition-colors focus-within:border-primary focus-within:bg-white md:rounded-xl md:px-4 md:py-3">
-            <Calendar className="mr-2 h-3.5 w-3.5 shrink-0 text-gray-400 md:mr-3 md:h-5 md:w-5" />
-            <select
-              value={mes}
-              onChange={(e) => setMes(e.target.value)}
-              className="w-full cursor-pointer appearance-none truncate bg-transparent text-[12px] text-gray-700 outline-none md:text-base"
-            >
-              <option value="">Cualquier fecha</option>
-              {mesesDisponibles.map((m) => (
-                <option key={m} value={m}>
-                  {formatMes(m)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Botón Buscar */}
-        <Button 
+    <div className="mx-auto w-full max-w-5xl rounded-[28px] border border-white/60 bg-white/95 p-2 shadow-[0_30px_70px_rgba(17,17,17,0.28)] backdrop-blur-xl md:rounded-full md:p-2.5">
+      <div className="flex flex-col gap-1 md:flex-row md:items-stretch md:gap-0">
+        <Field
+          label="Destino"
+          icon={MapPin}
+          placeholder="¿A dónde querés ir?"
+          options={destinationOptions}
+          value={destino}
+          onChange={handleDestinoChange}
+          allLabel="Todos los destinos"
+          emptyText="No encontramos destinos"
+        />
+        <div className="mx-4 h-px bg-black/5 md:mx-0 md:my-3 md:h-auto md:w-px" />
+        <Field
+          label="Experiencia"
+          icon={Compass}
+          placeholder={destino ? "Elegí una experiencia" : "Buscá una experiencia"}
+          options={experienceOptions}
+          value={slug}
+          onChange={handleExperienceChange}
+          allLabel="Todas las experiencias"
+          emptyText="No encontramos experiencias"
+        />
+        <div className="mx-4 h-px bg-black/5 md:mx-0 md:my-3 md:h-auto md:w-px" />
+        <Field
+          label="Fecha"
+          icon={Calendar}
+          placeholder="Cualquier fecha"
+          options={monthOptions}
+          value={mes}
+          onChange={setMes}
+          searchable={false}
+          allLabel="Cualquier fecha"
+          emptyText="Sin salidas próximas"
+        />
+        <button
+          type="button"
           onClick={handleSearch}
-          className="h-10 rounded-[15px] bg-primary px-5 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-primary/90 md:h-auto md:rounded-xl md:px-8 md:py-3 md:text-base"
+          className="mt-1 inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#111111] px-8 text-[15px] font-semibold text-[#CBBBA0] transition hover:bg-[#E30613] active:scale-[0.98] md:ml-2 md:mt-0 md:h-auto md:rounded-full"
         >
+          <Search className="h-4 w-4" />
           Buscar
-        </Button>
+        </button>
       </div>
     </div>
   );

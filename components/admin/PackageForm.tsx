@@ -8,6 +8,7 @@ import Link from 'next/link';
 import RichTextEditor from '@/components/admin/RichTextEditor';
 import ItineraryStepsEditor from '@/components/admin/ItineraryStepsEditor';
 import ImageUploader from '@/components/admin/ImageUploader';
+import AddonsManager from '@/components/admin/AddonsManager';
 import EditableList from '@/components/admin/EditableList';
 import DragDropOrderManager from '@/components/admin/DragDropOrderManager';
 import SalidasManager from '@/components/admin/SalidasManager';
@@ -16,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FormattedAmountInput } from '@/components/ui/formatted-amount-input';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -29,6 +31,7 @@ import {
   normalizePackageTypes,
   type PackageAdminFormData,
 } from '@/lib/packages/admin-form';
+import type { AddonFormItem } from '@/lib/packages/package-addons';
 import { humanizeExcursionType, type ExcursionTypeOption } from '@/lib/packages/package-types';
 
 type Props = {
@@ -49,6 +52,8 @@ type Props = {
   onNoIncludeItemsChange: (items: string[]) => void;
   condicionesItems: CondicionItem[];
   onCondicionesItemsChange: (items: CondicionItem[]) => void;
+  addons: AddonFormItem[];
+  onAddonsChange: (items: AddonFormItem[]) => void;
   salidas: Salida[];
   onSalidasChange: (salidas: Salida[]) => void;
   imagenTarjetaPreview: string[];
@@ -92,6 +97,8 @@ export default function PackageForm(props: Props) {
     onNoIncludeItemsChange,
     condicionesItems,
     onCondicionesItemsChange,
+    addons,
+    onAddonsChange,
     salidas,
     onSalidasChange,
     imagenTarjetaPreview,
@@ -123,7 +130,6 @@ export default function PackageForm(props: Props) {
   const ctaWhatsApp = watch('ctaWhatsApp');
   const mostrarDesde = watch('mostrarDesde');
   const descripcionCorta = watch('descripcionCorta');
-  const mostrarItinerario = watch('mostrarItinerario');
   const categoriaIds = watch('categoriaIds');
   const tipos = watch('tipos');
   const tarifaEspecialHabilitada = watch('tarifaEspecialHabilitada');
@@ -183,7 +189,7 @@ export default function PackageForm(props: Props) {
           className={`rounded-2xl border px-4 py-3 ${
             submitState === 'error'
               ? 'border-red-200 bg-red-50 text-red-700'
-              : 'border-[#F4D1D4] bg-[#FFF1F1] text-[#E30613]'
+              : 'border-sky-200 bg-sky-50 text-sky-800'
           }`}
         >
           <div className="flex items-start gap-3">
@@ -228,7 +234,7 @@ export default function PackageForm(props: Props) {
                 maxLength={160}
               />
               <div className="flex items-center justify-between mt-1">
-                <p className="text-sm text-gray-500">Este texto se usa solo en la tarjeta de la experiencia</p>
+                <p className="text-sm text-gray-500">Este texto se usa solo en la tarjeta de la excursion</p>
                 <p className={`text-sm ${(descripcionCorta?.length || 0) > 140 ? 'text-orange-500' : 'text-gray-500'}`}>
                   {descripcionCorta?.length || 0}/160 caracteres
                 </p>
@@ -248,7 +254,7 @@ export default function PackageForm(props: Props) {
                     <RichTextEditor
                       content={field.value}
                       onChange={field.onChange}
-                      placeholder="Describe la experiencia... Puedes usar negritas, listas y links."
+                      placeholder="Describe la excursion... Puedes usar negritas, listas y links."
                       enableMedia={false}
                     />
                   )}
@@ -258,25 +264,9 @@ export default function PackageForm(props: Props) {
             </div>
 
             <div id="itinerario-section" className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="mostrarItinerario" className="text-base font-medium cursor-pointer">
-                    Mostrar itinerario en la ficha pública
-                  </Label>
-                  <p className="text-sm text-gray-500">
-                    Activá esta opción si querés que el usuario final vea el programa detallado de la excursión.
-                  </p>
-                </div>
-                <Switch
-                  id="mostrarItinerario"
-                  checked={Boolean(mostrarItinerario)}
-                  onCheckedChange={(checked) => setValue('mostrarItinerario', checked, { shouldValidate: true })}
-                />
-              </div>
-
               <div>
                 <Label>
-                  Itinerario por pasos {mostrarItinerario ? <span className="text-red-500">*</span> : null}
+                  Itinerario
                 </Label>
                 <div className="mt-2">
                   <Controller
@@ -536,7 +526,7 @@ export default function PackageForm(props: Props) {
         <Card className="border-2">
           <CardHeader className="pb-4">
             <CardTitle>Excursion Destacada y Orden</CardTitle>
-            <p className="text-base text-gray-500 mt-1.5">Las experiencias destacadas aparecen en la pagina de inicio (maximo 9)</p>
+            <p className="text-base text-gray-500 mt-1.5">Las excursiones destacadas aparecen en la pagina de inicio (maximo 9)</p>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-start justify-between p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
@@ -547,7 +537,7 @@ export default function PackageForm(props: Props) {
                   <div className="flex items-center gap-2 mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <p className="text-sm text-amber-700">
-                      <strong>Limite alcanzado:</strong> Ya hay {destacadosCount} experiencias destacadas. Solo se mostraran las primeras 9 en el inicio.
+                      <strong>Limite alcanzado:</strong> Ya hay {destacadosCount} excursiones destacadas. Solo se mostraran las primeras 9 en el inicio.
                     </p>
                   </div>
                 )}
@@ -560,7 +550,7 @@ export default function PackageForm(props: Props) {
                 checked={destacado}
                 onCheckedChange={(checked) => {
                   if (checked && (mode === 'create' || !wasDestacado) && destacadosCount >= 9) {
-                    toast.warning('Ya hay 9 experiencias destacadas', {
+                    toast.warning('Ya hay 9 excursiones destacadas', {
                       description: 'Solo se mostraran los primeros 9 en el inicio (ordenados por numero de orden)',
                     });
                   }
@@ -592,7 +582,7 @@ export default function PackageForm(props: Props) {
               )
             ) : (
               <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
-                <p className="text-base text-blue-700 font-medium">Marca la experiencia como destacada para gestionar su orden de aparicion</p>
+                <p className="text-base text-blue-700 font-medium">Marca la excursion como destacada para gestionar su orden de aparicion</p>
               </div>
             )}
           </CardContent>
@@ -716,13 +706,31 @@ export default function PackageForm(props: Props) {
           </CardContent>
         </Card>
 
-        <Card id="salidas-section">
+       <Card id="salidas-section">
           <CardHeader className="pb-4">
-            <CardTitle>Fechas y Salidas</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Fechas y Salidas
+              <Badge>Nuevo</Badge>
+            </CardTitle>
             <p className="text-base text-gray-600 mt-1">Carga salidas solo si esta experiencia las necesita</p>
           </CardHeader>
           <CardContent>
             <SalidasManager salidas={salidas} onSalidasChange={onSalidasChange} />
+          </CardContent>
+        </Card>
+
+        <Card id="adicionales-section">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2">
+              Adicionales
+              <Badge>Nuevo</Badge>
+            </CardTitle>
+            <p className="text-base text-gray-600 mt-1">
+              Opcionales que el cliente puede sumar a la reserva, después de elegir la fecha.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <AddonsManager items={addons} onItemsChange={onAddonsChange} disabled={isBusy} />
           </CardContent>
         </Card>
 
@@ -761,28 +769,29 @@ export default function PackageForm(props: Props) {
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <Label htmlFor="maxPersonasPorReserva">
-                Máximo de personas por reserva <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="minLeadHours">Anticipación mínima de reserva (horas)</Label>
+                <Badge>Nuevo</Badge>
+              </div>
               <Controller
-                name="maxPersonasPorReserva"
+                name="minLeadHours"
                 control={control}
                 render={({ field }) => (
                   <Input
-                    id="maxPersonasPorReserva"
+                    id="minLeadHours"
                     type="number"
-                    min={1}
-                    max={50}
-                    value={field.value ?? 1}
-                    onChange={(event) => field.onChange(Number(event.target.value) || 1)}
+                    min={0}
+                    max={720}
+                    value={field.value ?? 48}
+                    onChange={(event) => field.onChange(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
                     className="mt-1.5 max-w-xs"
                   />
                 )}
               />
               <p className="mt-2 text-sm text-gray-500">
-                El usuario podrá reservar hasta este límite en una sola operación. El calendario además validará el cupo disponible de cada día.
+                Horas mínimas antes de la salida para poder reservar. Recomendado: 48. Usá 0 para permitir reservas de último momento.
               </p>
-              {errors.maxPersonasPorReserva && <p className="text-base text-red-500 mt-1">{errors.maxPersonasPorReserva.message}</p>}
+              {errors.minLeadHours && <p className="text-base text-red-500 mt-1">{errors.minLeadHours.message}</p>}
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -790,14 +799,14 @@ export default function PackageForm(props: Props) {
                 <div>
                   <Label className="text-base">Categorías de pasajeros</Label>
                   <p className="mt-1 text-sm text-gray-500">
-                    Define los mínimos y máximos por tipo. El total siempre se limita por el máximo por reserva y por el cupo disponible.
+                    Mínimo y máximo de personas por tipo.
                   </p>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    const currentMax = Math.max(1, Number(watch('maxPersonasPorReserva') ?? 1) || 1);
+                    const currentMax = 50;
                     const current = Array.isArray(watch('peopleCategories')) ? (watch('peopleCategories') as any[]) : [];
                     const index = current.length + 1;
                     const baseKey = `cat-${index}`;
@@ -878,7 +887,7 @@ export default function PackageForm(props: Props) {
                         max={50}
                         value={Number(item?.max ?? 0)}
                         onChange={(event) => {
-                          const maxTotal = Math.max(1, Number(watch('maxPersonasPorReserva') ?? 1) || 1);
+                          const maxTotal = 50;
                           const value = Math.max(0, Math.min(50, Math.min(maxTotal, Math.floor(Number(event.target.value) || 0))));
                           const current = Array.isArray(watch('peopleCategories')) ? (watch('peopleCategories') as any[]) : [];
                           const next = current.map((row, idx) => (idx === index ? { ...row, max: value } : row));
@@ -930,21 +939,21 @@ export default function PackageForm(props: Props) {
               onImagesChange={onImagenPortadaMobileChange}
               maxImages={1}
               label="Imagen de portada mobile *"
-              description="Se usa en el hero mobile de la experiencia. Medida recomendada: 1080x1350 px."
+              description="Se usa en el hero mobile de la excursion. Medida recomendada: 1080x1350 px."
             />
             <ImageUploader
               images={imagenPortadaDesktopPreview}
               onImagesChange={onImagenPortadaDesktopChange}
               maxImages={1}
               label="Imagen de portada PC *"
-              description="Se usa en el hero desktop de la experiencia. Medida recomendada: 1920x900 px."
+              description="Se usa en el hero desktop de la excursion. Medida recomendada: 1920x900 px."
             />
             <ImageUploader
               images={galeriaPreview}
               onImagesChange={onGaleriaChange}
               maxImages={8}
               label="Galeria de imagenes"
-              description="Imagenes adicionales para la galeria de la experiencia."
+              description="Imagenes adicionales para la galeria de la excursion."
             />
           </CardContent>
         </Card>

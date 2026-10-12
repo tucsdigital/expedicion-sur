@@ -1,16 +1,15 @@
 import AdminLayout from '@/components/admin/AdminLayout';
 import ProtectedRoute from '@/components/admin/ProtectedRoute';
 import ReservaSearchDashboard from '@/components/admin/ReservaSearchDashboard';
-import { getAllPaquetesAdmin } from '@/lib/paquetes';
+import { getAllExperienciasAdmin } from '@/lib/experiencias-catalog';
 
 export default async function AdminReservasBuscarPage() {
-  const paquetes = await getAllPaquetesAdmin();
+  const experiencias = await getAllExperienciasAdmin();
   return (
     <ProtectedRoute>
       <AdminLayout>
-        <ReservaSearchDashboard paquetes={paquetes} />
+        <ReservaSearchDashboard experiencias={experiencias} />
       </AdminLayout>
     </ProtectedRoute>
   );
 }
-

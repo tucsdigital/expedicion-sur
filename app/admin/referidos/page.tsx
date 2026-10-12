@@ -128,7 +128,7 @@ export default function ReferidosPage() {
               <div className="flex items-center gap-2">
                 <Search className="h-4 w-4 text-gray-500" />
                 <Input
-                  placeholder="Buscar por cliente o paquete"
+                  placeholder="Buscar por cliente o experiencia"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -195,7 +195,7 @@ export default function ReferidosPage() {
                         <TableRow className="border-black/5 hover:bg-transparent">
                           <TableHead className="px-4">Selec</TableHead>
                           <TableHead>Fecha</TableHead>
-                          <TableHead>Paquete</TableHead>
+                          <TableHead>Experiencia</TableHead>
                           <TableHead>Cliente</TableHead>
                           <TableHead>Vendedor</TableHead>
                           <TableHead>Venta</TableHead>

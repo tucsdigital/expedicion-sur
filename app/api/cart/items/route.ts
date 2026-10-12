@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 function legacyCartDisabled() {
   return NextResponse.json(
     {
-      error: 'El flujo de carrito ya no está disponible en Expedicion Sur. Reservá directo desde el paquete.',
+      error: 'El flujo de carrito ya no está disponible en Expedicion Sur. Reservá directo desde la experiencia.',
       code: 'LEGACY_CART_DISABLED',
     },
     { status: 410 }

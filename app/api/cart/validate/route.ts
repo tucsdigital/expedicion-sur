@@ -4,7 +4,7 @@ export const runtime = 'nodejs';
 
 export async function POST() {
   return legacyDisabledResponse({
-    error: 'La validación de carrito fue desactivada en Expedicion Sur. Usá la reserva directa desde el paquete.',
+    error: 'La validación de carrito fue desactivada en Expedicion Sur. Usá la reserva directa desde la experiencia.',
     code: 'LEGACY_CART_DISABLED',
   });
 }

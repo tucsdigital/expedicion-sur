@@ -18,7 +18,7 @@ import type { Paquete, Categoria } from '@/types';
 import PackageForm from '@/components/admin/PackageForm';
 import { usePackageEditorState } from '@/components/admin/usePackageEditorState';
 import { countFeaturedPackages, createExcursionType, fetchActiveCategorias, subscribeExcursionTypes } from '@/lib/packages/admin-queries';
-import { syncPackageCategoryData } from '@/lib/packages/category-utils';
+import { normalizeExperienciaCatalogo } from '@/lib/experiencias-catalog';
 import { normalizePeopleCategories } from '@/lib/packages/people-categories';
 import {
   collectFormErrorMessages,
@@ -78,11 +78,11 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
         setDestacadosCount(destacadosOtros);
 
         // Cargar paquete
-        const docRef = doc(db, 'paquetes', id);
+        const docRef = doc(db, 'experiencias', id);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          const data = syncPackageCategoryData(docSnap.data() as Paquete, catData);
+          const data = normalizeExperienciaCatalogo({ id: docSnap.id, ...docSnap.data() } as Paquete, catData);
           setCurrentPackage(data);
           setWasDestacado(data.destacado); // Guardar estado original
           setValue('titulo', data.titulo);
@@ -120,7 +120,7 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
           setValue('ctaWhatsApp', data.ctaWhatsApp);
           hydrateFromPackage(data, { getBlobKeyFromUrl });
         } else {
-          toast.error('Excursion no encontrada');
+          toast.error('Experiencia no encontrada');
           router.push('/admin/experiencias');
         }
       } catch (error) {
@@ -364,11 +364,11 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
         if (prevKey && !finalAddonKeySet.has(prevKey)) keysToDelete.add(prevKey);
       });
 
-      await updateDoc(doc(db, 'paquetes', id), sanitizedData);
+      await updateDoc(doc(db, 'experiencias', id), sanitizedData);
       const slugNew = slugify(data.titulo);
       await revalidateFrontPaths(['/experiencias', `/experiencia/${slugNew}`]);
 
-      toast.success('Excursion actualizada correctamente');
+      toast.success('Experiencia actualizada correctamente');
       router.push('/admin/experiencias');
     } catch (error) {
       console.error('Error updating paquete:', error);
@@ -462,7 +462,7 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
             loading={saving}
             submitState={submitState}
             submitMessage={submitMessage}
-            title="Editar Excursion"
+            title="Editar experiencia"
             subtitle="Modifica la informacion de la experiencia"
             submitLabel="Guardar Cambios"
             submittingLabel="Guardando..."

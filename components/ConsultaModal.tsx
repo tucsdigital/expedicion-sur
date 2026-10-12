@@ -87,8 +87,8 @@ export default function ConsultaModal({ isOpen, onClose, paqueteTitulo, paqueteI
     try {
       await addDoc(collection(db, 'consultas'), {
         ...data,
-        paquete: paqueteTitulo,
-        paqueteId: paqueteId,
+        experiencia: paqueteTitulo,
+        experienceSlug: paqueteId,
         fechaCreacion: Timestamp.now(),
         leida: false,
       });
@@ -135,7 +135,7 @@ export default function ConsultaModal({ isOpen, onClose, paqueteTitulo, paqueteI
               {/* Header */}
               <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
                 <div>
-                  <h2 className="text-lg font-bold text-gray-900">Consultá sobre este paquete</h2>
+                  <h2 className="text-lg font-bold text-gray-900">Consultá sobre esta experiencia</h2>
                   <p className="text-base text-gray-600 mt-1">{paqueteTitulo}</p>
                 </div>
                 <button
@@ -211,7 +211,7 @@ export default function ConsultaModal({ isOpen, onClose, paqueteTitulo, paqueteI
                     id="mensaje"
                     {...register('mensaje')}
                     className={`mt-2 min-h-[120px] ${errors.mensaje ? 'border-red-500' : ''}`}
-                    placeholder="Contanos tu consulta sobre este paquete..."
+                    placeholder="Contanos tu consulta sobre esta experiencia..."
                     disabled={loading}
                   />
                   {errors.mensaje && (
@@ -263,4 +263,3 @@ export default function ConsultaModal({ isOpen, onClose, paqueteTitulo, paqueteI
     </AnimatePresence>
   );
 }
-

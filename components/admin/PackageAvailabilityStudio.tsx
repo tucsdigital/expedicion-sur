@@ -111,8 +111,8 @@ export default function PackageAvailabilityStudio({
     <div className="space-y-5">
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle>Vigencia del paquete</CardTitle>
-          <p className="text-sm text-gray-500">Definí hasta cuándo se muestra el paquete publicado.</p>
+          <CardTitle>Vigencia de la experiencia</CardTitle>
+          <p className="text-sm text-gray-500">Definí hasta cuándo se muestra la experiencia publicada.</p>
         </CardHeader>
         <CardContent className="space-y-5">
           <div>
@@ -130,8 +130,8 @@ export default function PackageAvailabilityStudio({
 
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle>Fechas del paquete</CardTitle>
-          <p className="text-sm text-gray-500">Cada paquete necesita al menos una fecha y su precio base.</p>
+          <CardTitle>Fechas de la experiencia</CardTitle>
+          <p className="text-sm text-gray-500">Cada experiencia necesita al menos una fecha y su precio base.</p>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -187,7 +187,7 @@ export default function PackageAvailabilityStudio({
                 <CalendarDays className="h-5 w-5 text-gray-500" />
               </div>
               <div className="mt-4 text-base font-semibold text-gray-900">Todavía no cargaste fechas</div>
-              <div className="mt-1 text-sm text-gray-500">Agregá al menos una fecha para poder vender el paquete.</div>
+              <div className="mt-1 text-sm text-gray-500">Agregá al menos una fecha para poder vender la experiencia.</div>
             </div>
           ) : (
             <div className="space-y-3">

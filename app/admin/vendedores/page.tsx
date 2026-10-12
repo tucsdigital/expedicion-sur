@@ -58,8 +58,6 @@ export default function VendedoresPage() {
     currency: 'ars',
   });
   const [saving, setSaving] = useState(false);
-  const [tempPwd, setTempPwd] = useState<string | null>(null);
-  const [tempPwdFor, setTempPwdFor] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -114,54 +112,6 @@ export default function VendedoresPage() {
     setFormOpen(true);
   };
 
-  const save = async () => {
-    setSaving(true);
-    try {
-      const payload = {
-        name: form.name.trim(),
-        email: form.email.trim().toLowerCase(),
-        dni: normalizeDni(form.dni),
-        normalizedDni: normalizeDni(form.dni),
-        active: form.active === 'true',
-        defaultCommission: {
-          type: form.type,
-          value: Number(form.value),
-          currency: form.currency,
-        },
-      };
-      if (!payload.name || !payload.email || !payload.normalizedDni || Number.isNaN(payload.defaultCommission.value)) {
-        toast.error('Completá nombre, email, DNI y comisión.');
-        setSaving(false);
-        return;
-        }
-      if (editing) {
-        await updateDoc(doc(db, 'vendors', editing.id), payload as any);
-        setVendors(prev => prev.map(v => (v.id === editing.id ? { ...v, ...(payload as any) } : v)));
-        toast.success('Vendedor actualizado');
-      } else {
-        const ref = await addDoc(collection(db, 'vendors'), payload as any);
-        const created: Vendor = { id: ref.id, ...(payload as any) };
-        setVendors(prev => [created, ...prev]);
-        toast.success('Vendedor creado');
-      }
-      setFormOpen(false);
-    } catch {
-      toast.error('No se pudo guardar');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeVendor = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, 'vendors', id));
-      setVendors(prev => prev.filter(v => v.id !== id));
-      toast.success('Vendedor eliminado');
-    } catch {
-      toast.error('No se pudo eliminar');
-    }
-  };
-
   const getIdToken = async () => {
     const auth = getAuthInstance();
     const cu = auth.currentUser;
@@ -169,30 +119,81 @@ export default function VendedoresPage() {
     return cu.getIdToken();
   };
 
-  const callVendorAuth = async (action: 'create' | 'reset' | 'disable' | 'enable', v: Vendor) => {
+  const callApi = async (url: string, method: 'POST' | 'PATCH' | 'DELETE', body: unknown) => {
     const token = await getIdToken();
-    const res = await fetch('/api/admin/vendors/auth', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ action, email: v.email, vendorId: v.id }),
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data?.error || 'Error de servidor');
-    }
-    return data as { ok: true; tempPassword?: string };
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'Error de servidor');
+    return data;
   };
+
+  const save = async () => {
+    const dni = normalizeDni(form.dni);
+    const payload = {
+      name: form.name.trim(),
+      email: form.email.trim().toLowerCase(),
+      dni,
+      active: form.active === 'true',
+      defaultCommission: {
+        type: form.type,
+        value: Number(form.value),
+        currency: form.currency,
+      },
+    };
+    if (!payload.name || !payload.email || !dni || Number.isNaN(payload.defaultCommission.value)) {
+      toast.error('Completá nombre, email, DNI y comisión.');
+      return;
+    }
+    if (!/^\d{7,8}$/.test(dni)) {
+      toast.error('El DNI debe tener 7 u 8 dígitos.');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editing) {
+        const data = await callApi('/api/admin/vendors', 'PATCH', { ...payload, vendorId: editing.id });
+        setVendors(prev => prev.map(v => (v.id === editing.id ? { ...v, ...(data.vendor as Vendor) } : v)));
+        toast.success('Vendedor actualizado');
+      } else {
+        const data = await callApi('/api/admin/vendors', 'POST', payload);
+        setVendors(prev => [data.vendor as Vendor, ...prev]);
+        toast.success('Vendedor creado. Ingresa con su email y su DNI como contraseña.');
+      }
+      setFormOpen(false);
+      setEditing(null);
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeVendor = async (id: string) => {
+    try {
+      const data = await callApi('/api/admin/vendors', 'DELETE', { vendorId: id });
+      setVendors(prev => prev.filter(v => v.id !== id));
+      toast.success(
+        data?.keptReservations
+          ? `Vendedor eliminado. Se conservan ${data.keptReservations} ventas históricas.`
+          : 'Vendedor eliminado'
+      );
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo eliminar');
+    }
+  };
+
+  const callVendorAuth = (action: 'create' | 'reset' | 'disable' | 'enable', v: Vendor) =>
+    callApi('/api/admin/vendors/auth', 'POST', { action, vendorId: v.id }) as Promise<{ ok: true; authUid?: string }>;
 
   const createAuthAndSend = async (v: Vendor) => {
     try {
       const data = await callVendorAuth('create', v);
-      setTempPwd(data.tempPassword || null);
-      setTempPwdFor(v.email);
-      setVendors(prev => prev.map(x => x.id === v.id ? { ...x, active: true, authUid: x.authUid ?? 'created', mustChangePassword: true } : x));
-      toast.success('Usuario creado y acceso enviado');
+      setVendors(prev => prev.map(x => x.id === v.id ? { ...x, active: true, authUid: data.authUid ?? x.authUid, mustChangePassword: false } : x));
+      toast.success('Acceso creado. La contraseña es el DNI del vendedor.');
     } catch (e: any) {
       toast.error(e.message || 'No se pudo crear el usuario');
     }
@@ -200,10 +201,8 @@ export default function VendedoresPage() {
 
   const resetPassword = async (v: Vendor) => {
     try {
-      const data = await callVendorAuth('reset', v);
-      setTempPwd(data.tempPassword || null);
-      setTempPwdFor(v.email);
-      toast.success('Contraseña blanqueada y enviada por email');
+      await callVendorAuth('reset', v);
+      toast.success('Contraseña restablecida al DNI del vendedor');
     } catch (e: any) {
       toast.error(e.message || 'No se pudo blanquear');
     }
@@ -392,13 +391,13 @@ export default function VendedoresPage() {
                                     {!v.authUid ? (
                                       <DropdownMenuItem onClick={() => createAuthAndSend(v)}>
                                         <Mail className="h-4 w-4" />
-                                        Crear usuario y enviar acceso
+                                        Crear acceso (contraseña = DNI)
                                       </DropdownMenuItem>
                                     ) : (
                                       <>
                                         <DropdownMenuItem onClick={() => resetPassword(v)}>
                                           <KeyRound className="h-4 w-4" />
-                                          Blanquear contraseña
+                                          Restablecer contraseña al DNI
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => toggleActive(v)}>
                                           {v.active ? (
@@ -449,7 +448,7 @@ export default function VendedoresPage() {
             <DialogContent className="sm:max-w-[620px] bg-white dark:bg-white rounded-xl border border-gray-200 dark:border-gray-200 shadow-2xl text-gray-900 dark:text-gray-900">
               <DialogHeader>
                 <DialogTitle>{editing ? 'Editar vendedor' : 'Nuevo vendedor'}</DialogTitle>
-                <DialogDescription>Definí datos básicos y la comisión por defecto.</DialogDescription>
+                <DialogDescription>Definí datos básicos y la comisión por defecto. La contraseña de acceso es el DNI.</DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-2">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -542,7 +541,7 @@ export default function VendedoresPage() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>¿Eliminar vendedor?</AlertDialogTitle>
-                <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
+                <AlertDialogDescription>Se elimina su acceso, su usuario y sus enlaces de referido. Las ventas ya realizadas se conservan en el historial. Esta acción no se puede deshacer.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -551,29 +550,6 @@ export default function VendedoresPage() {
             </AlertDialogContent>
           </AlertDialog>
 
-          {tempPwd && tempPwdFor && (
-            <Card className="border-emerald-300 bg-emerald-50">
-              <CardHeader>
-                <CardTitle className="text-emerald-800 text-base">Credenciales temporales generadas</CardTitle>
-              </CardHeader>
-              <CardContent className="flex items-center justify-between">
-                <div className="text-sm text-emerald-900">
-                  <div><span className="font-semibold">Email:</span> {tempPwdFor}</div>
-                  <div><span className="font-semibold">Contraseña:</span> {tempPwd}</div>
-                </div>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`Email: ${tempPwdFor}\nContraseña: ${tempPwd}`);
-                    toast.success('Credenciales copiadas');
-                  }}
-                  className="gap-1"
-                >
-                  <Copy className="h-4 w-4" /> Copiar
-                </Button>
-              </CardContent>
-            </Card>
-          )}
         </div>
       </AdminLayout>
     </ProtectedRoute>

@@ -225,7 +225,7 @@ export default async function CheckoutSuccessPage({
   const paquete = !orderId && slug ? await getPaqueteBySlug(slug) : null;
   const title =
     order?.items?.length === 1
-      ? String(order.items[0]?.packageTitle || 'Tu compra')
+      ? String((order.items[0] as any)?.experienceTitle || order.items[0]?.packageTitle || 'Tu compra')
       : orderId
         ? 'Tu compra'
         : paquete?.titulo ?? (slug || 'Tu reserva');

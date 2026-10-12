@@ -130,7 +130,7 @@ export async function POST(request: Request) {
 
   const codeOut = String(reserva.reservationCode ?? '').trim() || null;
   const reservationId = String(reserva.id ?? '');
-  const packageTitle = String(reserva.packageTitle ?? reserva.experienceTitle ?? 'Paquete');
+  const experienceTitle = String(reserva.experienceTitle ?? reserva.packageTitle ?? 'Experiencia');
   const departureDate = String(reserva.date ?? 'sin-fecha');
   const people = Number(reserva.people ?? 0);
   const selectedSeats = Array.isArray(reserva.selectedSeats) ? reserva.selectedSeats.map((s: any) => String(s)) : null;
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
       voucherStatus: ventaStatuses.voucherStatus,
       customerEmailStatus: ventaStatuses.customerEmailStatus,
       publicState: ventaStatuses.publicState,
-      packageTitle,
+      experienceTitle,
       departureDate,
       people,
       selectedSeats,

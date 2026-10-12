@@ -142,7 +142,7 @@ export default function SeccionesPage() {
         setLoading(true);
         const [categoriasSnap, paquetesSnap, paquetesF1Snap, seccionesSnap] = await Promise.all([
           getDocs(collection(db, 'categorias')),
-          getDocs(query(collection(db, 'paquetes'), firestoreOrderBy('orden', 'asc'))),
+          getDocs(query(collection(db, 'experiencias'), firestoreOrderBy('orden', 'asc'))),
           getDocs(query(collection(db, 'paquetes_f1'), firestoreOrderBy('orden', 'asc'))),
           getDocs(query(collection(db, 'secciones'), firestoreOrderBy('orden', 'asc'))),
         ]);
@@ -433,7 +433,7 @@ export default function SeccionesPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
-                  <SelectItem value="paquete">Paquetes</SelectItem>
+                  <SelectItem value="paquete">Experiencias</SelectItem>
                   <SelectItem value="f1">F1</SelectItem>
                 </SelectContent>
               </Select>
@@ -488,7 +488,7 @@ export default function SeccionesPage() {
             </div>
             <div className="relative">
               <Input
-                placeholder='Nuevo subtítulo (ej: "Paquetes" o "F1")'
+                placeholder='Nuevo subtítulo (ej: "Experiencias" o "F1")'
                 value={newSubtitle}
                 onChange={(e) => setNewSubtitle(e.target.value)}
               />

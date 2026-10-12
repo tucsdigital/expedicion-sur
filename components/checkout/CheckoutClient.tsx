@@ -404,7 +404,7 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           slug: experience.slug,
-          packageId: experience.id,
+          experienceId: experience.id,
           date,
           people: travelerCount,
           ...(pax ? { peopleBreakdown: pax } : {}),

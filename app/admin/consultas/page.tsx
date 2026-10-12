@@ -172,11 +172,11 @@ export default function ConsultasPage() {
                         </Badge>
                       </div>
                       
-                      {consulta.paquete && (
+                       {(consulta.experiencia || consulta.paquete) && (
                         <div className="mb-3">
                           <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
                             <Package className="h-3 w-3 mr-1" />
-                            {consulta.paquete}
+                             {consulta.experiencia || consulta.paquete}
                           </Badge>
                         </div>
                       )}
@@ -303,8 +303,8 @@ export default function ConsultasPage() {
 
                 {/* Contenido */}
                 <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-                  {/* Paquete consultado - destacado */}
-                  {selectedConsulta.paquete && (
+                  {/* Experiencia consultada - destacado */}
+                  {(selectedConsulta.experiencia || selectedConsulta.paquete) && (
                     <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-200 rounded-xl p-4 sm:p-5 shadow-sm">
                       <div className="flex items-start gap-3">
                         <div className="bg-purple-600 rounded-lg p-2 sm:p-2.5 flex-shrink-0">
@@ -312,9 +312,9 @@ export default function ConsultasPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm sm:text-base font-semibold text-purple-600 uppercase tracking-wide mb-1">
-                            Paquete Consultado
+                            Experiencia consultada
                           </p>
-                          <p className="text-lg sm:text-base font-bold text-purple-900 break-words">{selectedConsulta.paquete}</p>
+                          <p className="text-lg sm:text-base font-bold text-purple-900 break-words">{selectedConsulta.experiencia ?? selectedConsulta.paquete}</p>
                         </div>
                       </div>
                     </div>
@@ -432,7 +432,7 @@ export default function ConsultasPage() {
                       <a 
                         href={`https://wa.me/${sanitizePhoneForWhatsApp(selectedConsulta.telefono)}?text=${encodeURIComponent(
                           `Hola ${selectedConsulta.nombre}, somos de *${SITE_NAME}*\n\n` +
-                          `Te contacto por tu consulta${selectedConsulta.paquete ? ` sobre el paquete *"${selectedConsulta.paquete}"*` : ''}.\n\n` +
+                          `Te contacto por tu consulta${selectedConsulta.experiencia || selectedConsulta.paquete ? ` sobre la experiencia *"${selectedConsulta.experiencia || selectedConsulta.paquete}"*` : ''}.\n\n` +
                           `¿En qué puedo ayudarte?`
                         )}`}
                         target="_blank"

@@ -133,7 +133,7 @@ function removeUndefinedFields(input: PackageDocumentInput): PackageDocumentInpu
 }
 
 export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqueteResult> {
-  const paqueteRef = doc(db, 'paquetes', paqueteId);
+  const paqueteRef = doc(db, 'experiencias', paqueteId);
   const paqueteSnapshot = await getDoc(paqueteRef);
 
   if (!paqueteSnapshot.exists()) {
@@ -141,7 +141,7 @@ export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqu
   }
 
   const original = paqueteSnapshot.data() as Paquete;
-  const paquetesSnapshot = await getDocs(query(collection(db, 'paquetes'), orderBy('orden', 'asc')));
+  const paquetesSnapshot = await getDocs(query(collection(db, 'experiencias'), orderBy('orden', 'asc')));
   const paquetesExistentes = paquetesSnapshot.docs.map((item) => ({
     id: item.id,
     ...item.data(),
@@ -214,7 +214,7 @@ export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqu
   };
 
   const sanitizedDuplicatedData = removeUndefinedFields(duplicatedData) as Omit<Paquete, 'id'>;
-  const createdDoc = await addDoc(collection(db, 'paquetes'), sanitizedDuplicatedData);
+  const createdDoc = await addDoc(collection(db, 'experiencias'), sanitizedDuplicatedData);
 
   return {
     id: createdDoc.id,

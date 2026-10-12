@@ -21,7 +21,7 @@ type PublicReservation = {
   voucherStatus?: string;
   customerEmailStatus?: string;
   publicState?: { tone: 'success' | 'pending' | 'warning' | 'error'; title: string; description: string };
-  packageTitle: string;
+  experienceTitle: string;
   departureDate: string;
   people: number;
   selectedSeats: string[] | null;
@@ -195,8 +195,8 @@ export default function ConsultarReservaClient({ initialCode }: { initialCode: s
                   <div className="text-xs text-gray-600">{reservation.customerMasked.email}</div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wide text-gray-500">Paquete</div>
-                  <div className="mt-1 font-semibold text-gray-900">{reservation.packageTitle}</div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500">Experiencia</div>
+                  <div className="mt-1 font-semibold text-gray-900">{reservation.experienceTitle}</div>
                 </div>
                 <div>
                   <div className="text-xs uppercase tracking-wide text-gray-500">Salida</div>

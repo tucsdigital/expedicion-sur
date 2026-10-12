@@ -15,8 +15,9 @@ export type Vendor = {
     value: number;
     currency: CurrencyCode;
   };
-  allowedPackages?: string[] | null;
   allowedExperiences?: string[] | null;
+  /** Solo para leer perfiles antiguos durante la migración del catálogo. */
+  allowedPackages?: string[] | null;
   paymentDetails?: {
     method?: string | null;
     account?: string | null;
@@ -29,6 +30,7 @@ export type ReferralLink = {
   id: string;
   vendorId: string;
   code: string;
+  /** Solo lectura de enlaces antiguos; los nuevos guardan experienceId. */
   packageId?: string | null;
   experienceId?: string | null;
   active: boolean;

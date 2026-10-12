@@ -1,6 +1,7 @@
 import { MetadataRoute } from 'next';
 import { collection, getDocs, query, orderBy as firestoreOrderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getExperiencias } from '@/lib/experiencias-catalog';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://viaggiotur.vercel.app';
 
@@ -50,17 +51,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       }
     });
 
-    // Obtener paquetes
-    const paquetesSnapshot = await getDocs(
-      query(collection(db, 'paquetes'), firestoreOrderBy('orden', 'asc'))
-    );
-    
-    paquetesSnapshot.docs.forEach((doc) => {
-      const paquete = doc.data();
-      if (paquete.visible && paquete.slug) {
+    // Obtener experiencias del catálogo canónico con respaldo de lectura histórico.
+    const experiencias = await getExperiencias();
+    experiencias.forEach((experience) => {
+      if (experience.visible && experience.slug) {
         routes.push({
-          url: `${siteUrl}/experiencia/${paquete.slug}`,
-          lastModified: paquete.fechaCreacion?.toDate() || new Date(),
+          url: `${siteUrl}/experiencia/${experience.slug}`,
+          lastModified: (experience.fechaCreacion as any)?.toDate?.() ?? experience.fechaCreacion ?? new Date(),
           changeFrequency: 'weekly',
           priority: 0.7,
         });

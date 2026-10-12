@@ -11,7 +11,7 @@ import ProtectedRoute from '@/components/admin/ProtectedRoute';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  Package,
+  Sparkles,
   FolderKanban,
   MessageSquare,
   Mail,
@@ -49,7 +49,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     categorias: 0,
-    paquetes: 0,
+    experiencias: 0,
     consultas: 0,
     newsletter: 0,
     ventasConfirmadas: 0,
@@ -65,13 +65,13 @@ export default function AdminDashboard() {
       try {
         const [
           categoriasSnap,
-          paquetesSnap,
+          experienciasSnap,
           consultasSnap,
           newsletterSnap,
           reservas,
         ] = await Promise.all([
           getDocs(collection(db, 'categorias')),
-          getDocs(collection(db, 'paquetes')),
+          getDocs(collection(db, 'experiencias')),
           getDocs(query(collection(db, 'consultas'), where('leida', '==', false))),
           getDocs(collection(db, 'newsletter')),
           getReservas({ limit: RESERVAS_LIMIT }),
@@ -104,7 +104,7 @@ export default function AdminDashboard() {
 
         setStats({
           categorias: categoriasSnap.size,
-          paquetes: paquetesSnap.size,
+          experiencias: experienciasSnap.size,
           consultas: consultasSnap.size,
           newsletter: newsletterSnap.size,
           ventasConfirmadas: computed.ventasConfirmadas,
@@ -125,9 +125,9 @@ export default function AdminDashboard() {
 
   const cards = [
     {
-      label: 'Paquetes',
-      value: stats.paquetes,
-      icon: Package,
+      label: 'Experiencias',
+      value: stats.experiencias,
+      icon: Sparkles,
       accent: 'from-[#CBBBA0]/35 to-transparent',
       iconClass: 'bg-[#F7F2EA] text-[#8E6B45]',
       href: '/admin/experiencias',
@@ -310,7 +310,7 @@ export default function AdminDashboard() {
                               <td className="py-3 pr-3 font-mono text-xs text-gray-700">{String((r as any).reservationCode ?? r.id).slice(0, 16)}</td>
                               <td className="py-3 pr-3">
                                 <Link href={`/admin/ventas/${r.id}`} className="font-semibold text-gray-900 hover:underline">
-                                  {r.packageTitle || r.experienceTitle || '—'}
+                                  {r.experienceTitle || r.packageTitle || '—'}
                                 </Link>
                               </td>
                               <td className="py-3 pr-3">{formatReservationDate(r.date)}</td>

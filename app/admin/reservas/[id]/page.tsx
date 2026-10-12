@@ -47,10 +47,11 @@ import {
   Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Vendor, ReferralLink } from '@/types/vendor';
-import { getVendors, getReferralLinksByVendor } from '@/lib/vendors';
-import { getAllPaquetesAdmin } from '@/lib/paquetes';
-import { getPackageAddonOptions } from '@/lib/packages/resolve-departure';
+import type { AdminVendorLink } from '@/lib/admin-vendors-client';
+import VendorCombobox from '@/components/admin/VendorCombobox';
+import { fetchAdminVendorLinks } from '@/lib/admin-vendors-client';
+import { getAllExperienciasAdmin } from '@/lib/experiencias-catalog';
+import { getExperienceAddonOptions } from '@/lib/experience-booking';
 import { getCountryByName } from '@/lib/countries';
 import { buildVentaStatuses, ventaStatusLabel } from '@/lib/sales/status';
 import { computeVentaFinance, financeStatusLabel, type VentaFinance } from '@/lib/sales/finance';
@@ -198,9 +199,8 @@ export default function ReservaDetailPage() {
   const [stock, setStock] = useState<StockSummary | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [otherPurchases, setOtherPurchases] = useState<Reservation[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorId, setVendorId] = useState('');
-  const [links, setLinks] = useState<ReferralLink[]>([]);
+  const [links, setLinks] = useState<AdminVendorLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
   const [pickedCode, setPickedCode] = useState('');
   const [manualCode, setManualCode] = useState('');
@@ -210,7 +210,7 @@ export default function ReservaDetailPage() {
   const [form, setForm] = useState<PaymentFormState>({ movementType: 'payment', amount: '', method: 'transfer', reference: '', message: '' });
   const [showAddonForm, setShowAddonForm] = useState(false);
   const [addonCatalog, setAddonCatalog] = useState<
-    Array<{ key: string; packageTitle: string; addon: { id: string; title: string; price: number } }>
+    Array<{ key: string; experienceTitle: string; addon: { id: string; title: string; price: number } }>
   >([]);
   const [loadingAddons, setLoadingAddons] = useState(false);
   const [addonQuery, setAddonQuery] = useState('');
@@ -244,24 +244,23 @@ export default function ReservaDetailPage() {
 
   useEffect(() => { load(true); }, [load]);
 
-  // Catálogo de adicionales de esta + todas las excursiones (edición de la
-  // venta: permite sumar un adicional creado para otro paquete).
+  // Catálogo de adicionales de esta u otras experiencias para la edición.
   useEffect(() => {
     let off = false;
     setLoadingAddons(true);
-    getAllPaquetesAdmin()
+    getAllExperienciasAdmin()
       .then((all) => {
         if (off) return;
-        const entries: Array<{ key: string; packageTitle: string; addon: { id: string; title: string; price: number } }> = [];
-        const currentId = String(reserva?.packageId ?? reserva?.experienceId ?? '');
-        for (const pkg of all) {
-          if (!pkg) continue;
-          const isCurrent = currentId && pkg.id === currentId;
-          const options = getPackageAddonOptions(pkg as any);
+        const entries: Array<{ key: string; experienceTitle: string; addon: { id: string; title: string; price: number } }> = [];
+        const currentId = String(reserva?.experienceId ?? reserva?.packageId ?? '');
+        for (const experience of all) {
+          if (!experience) continue;
+          const isCurrent = currentId && experience.id === currentId;
+          const options = getExperienceAddonOptions(experience as any);
           for (const option of options) {
             entries.push({
-              key: `${isCurrent ? 'pkg' : 'catalog'}:${pkg.id}:${option.id}`,
-              packageTitle: isCurrent ? 'Esta excursión' : String(pkg.titulo ?? 'Sin título'),
+              key: `${isCurrent ? 'experience' : 'catalog'}:${experience.id}:${option.id}`,
+              experienceTitle: isCurrent ? 'Esta experiencia' : String(experience.titulo ?? (experience as any).title ?? 'Sin título'),
               addon: { id: option.id, title: option.title, price: option.price },
             });
           }
@@ -275,12 +274,6 @@ export default function ReservaDetailPage() {
   }, [reserva?.experienceId, reserva?.packageId]);
 
   useEffect(() => {
-    let off = false;
-    getVendors({ activeOnly: true, limit: 200 }).then((l) => { if (!off) setVendors(l); }).catch(() => {});
-    return () => { off = true; };
-  }, []);
-
-  useEffect(() => {
     if (!reserva?.referredBy) { setVendorId(''); setPickedCode(''); setManualCode(''); setLinks([]); return; }
     setVendorId(reserva.referredBy.vendorId ?? '');
     setPickedCode(reserva.referredBy.code ?? '');
@@ -291,18 +284,18 @@ export default function ReservaDetailPage() {
     let off = false;
     if (!vendorId) { setLinks([]); setLinksLoading(false); return; }
     setLinksLoading(true);
-    getReferralLinksByVendor(vendorId).then((l) => { if (!off) setLinks(l); }).catch(() => { if (!off) setLinks([]); }).finally(() => { if (!off) setLinksLoading(false); });
+    fetchAdminVendorLinks(vendorId).then((l) => { if (!off) setLinks(l); }).catch(() => { if (!off) setLinks([]); }).finally(() => { if (!off) setLinksLoading(false); });
     return () => { off = true; };
   }, [vendorId]);
 
   const fetchStock = useCallback(async () => {
-    const packageId = String(reserva?.packageId ?? reserva?.experienceId ?? '').trim();
+    const experienceId = String(reserva?.experienceId ?? reserva?.packageId ?? '').trim();
     const date = String(reserva?.date ?? '').trim();
-    if (!reserva || !user || !packageId || !date || date === 'sin-fecha') { setStock(null); return; }
+    if (!reserva || !user || !experienceId || !date || date === 'sin-fecha') { setStock(null); return; }
     setStockLoading(true);
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/stock?packageId=${encodeURIComponent(packageId)}&date=${encodeURIComponent(date)}`, {
+      const res = await fetch(`/api/admin/stock?experienceId=${encodeURIComponent(experienceId)}&date=${encodeURIComponent(date)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setStock(res.ok ? await res.json() : null);
@@ -339,12 +332,12 @@ export default function ReservaDetailPage() {
     [payments],
   );
 
-  const linksForPackage = useMemo(() => {
-    const pid = String(reserva?.packageId ?? reserva?.experienceId ?? '').trim();
-    if (!pid) return links;
-    return links.filter((l) => {
-      const lp = String(l.packageId ?? l.experienceId ?? '').trim();
-      return !lp || lp === pid;
+  const linksForExperience = useMemo(() => {
+    const experienceId = String(reserva?.experienceId ?? reserva?.packageId ?? '').trim();
+    if (!experienceId) return links;
+    return links.filter((link) => {
+      const linkExperienceId = String(link.experienceId ?? '').trim();
+      return !linkExperienceId || linkExperienceId === experienceId;
     });
   }, [links, reserva?.experienceId, reserva?.packageId]);
 
@@ -358,7 +351,7 @@ export default function ReservaDetailPage() {
       if (!query) return true;
       return (
         entry.addon.title.toLowerCase().includes(query) ||
-        entry.packageTitle.toLowerCase().includes(query)
+        entry.experienceTitle.toLowerCase().includes(query)
       );
     });
   }, [addonCatalog, addonQuery, reserva?.selectedExtras]);
@@ -418,7 +411,7 @@ export default function ReservaDetailPage() {
   if (!reserva || !finance) return null;
 
   const r = reserva as Reservation & Record<string, unknown>;
-  const title = reserva.packageTitle || reserva.experienceTitle || 'Venta';
+  const title = reserva.experienceTitle || reserva.packageTitle || 'Venta';
   const code = String(r.reservationCode ?? '').trim();
   const seats: string[] = Array.isArray(r.selectedSeats) ? r.selectedSeats.map(String) : [];
   const extras = (Array.isArray(r.selectedExtras) ? r.selectedExtras : []).filter((x: { label?: string }) => String(x?.label ?? '').trim());
@@ -499,12 +492,15 @@ export default function ReservaDetailPage() {
       const res = await fetch('/api/admin/reservas', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reservationId: reserva.id, ...(type === 'customer' ? { enqueueCustomerVoucherEmail: true } : { enqueueAdminNotificationEmail: true }) }),
+        body: JSON.stringify({ reservationId: reserva.id, sendEmailNow: true, ...(type === 'customer' ? { enqueueCustomerVoucherEmail: true } : { enqueueAdminNotificationEmail: true }) }),
       });
-      if (!res.ok) throw new Error();
-      toast.success('Email reencolado');
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || 'No pudimos enviar el email');
+      }
+      toast.success(type === 'customer' ? 'Voucher enviado al cliente' : 'Aviso interno enviado');
       await load(false);
-    } catch { toast.error('No pudimos encolar el email'); } finally { setBusy(false); }
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'No pudimos enviar el email'); await load(false); } finally { setBusy(false); }
   };
 
   const uploadFiles = async (files: FileList | null) => {
@@ -756,7 +752,7 @@ export default function ReservaDetailPage() {
                     {showAddonForm && (
                       <div className="mt-2 rounded-xl bg-white p-3 ring-1 ring-black/[0.06]">
                         <p className="text-xs text-slate-500">
-                          Sumá un adicional ya creado (de esta u otra excursión). Se agrega al total y queda registrado como movimiento.
+                          Sumá un adicional ya creado (de esta u otra experiencia). Se agrega al total y queda registrado como movimiento.
                         </p>
                         <div className="mt-2 grid gap-2 sm:grid-cols-2">
                           <div className="space-y-1 sm:col-span-2">
@@ -778,7 +774,7 @@ export default function ReservaDetailPage() {
                                 <SelectItem value="none">Elegí un adicional</SelectItem>
                                 {filteredAddons.slice(0, 40).map((entry) => (
                                   <SelectItem key={entry.key} value={entry.key}>
-                                    {entry.addon.title} · ${entry.addon.price.toLocaleString('es-AR')} · {entry.packageTitle}
+                                    {entry.addon.title} · ${entry.addon.price.toLocaleString('es-AR')} · {entry.experienceTitle}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -823,7 +819,7 @@ export default function ReservaDetailPage() {
                             <SelectItem value="none">Elegí un adicional</SelectItem>
                             {filteredAddons.slice(0, 40).map((entry) => (
                               <SelectItem key={entry.key} value={entry.key}>
-                                {entry.addon.title} · ${entry.addon.price.toLocaleString('es-AR')} · {entry.packageTitle}
+                                {entry.addon.title} · ${entry.addon.price.toLocaleString('es-AR')} · {entry.experienceTitle}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -880,7 +876,7 @@ export default function ReservaDetailPage() {
                       {otherPurchases.map((o) => (
                         <li key={o.id}>
                           <Link href={`/admin/ventas/${o.id}`} className="text-sm text-slate-600 hover:text-slate-900 hover:underline">
-                            {o.packageTitle || o.experienceTitle || 'Venta'} · {formatDate(o.date)} · {formatAmount(o.amountTotal, o.currency)}
+                            {o.experienceTitle || o.packageTitle || 'Venta'} · {formatDate(o.date)} · {formatAmount(o.amountTotal, o.currency)}
                           </Link>
                         </li>
                       ))}
@@ -992,18 +988,17 @@ export default function ReservaDetailPage() {
                   </p>
                 )}
                 <div className="mt-3 space-y-2">
-                  <Select value={vendorId || 'none'} onValueChange={(v) => { setVendorId(v === 'none' ? '' : v); setPickedCode(''); setManualCode(''); }} disabled={savingReferral}>
-                    <SelectTrigger><SelectValue placeholder="Elegí vendedor" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sin vendedor</SelectItem>
-                      {vendors.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <Select value={pickedCode || 'none'} onValueChange={(v) => { setPickedCode(v === 'none' ? '' : v); setManualCode(''); }} disabled={!vendorId || !linksForPackage.length || linksLoading || savingReferral}>
+                  <VendorCombobox
+                    value={vendorId}
+                    includeId={reserva.referredBy?.vendorId}
+                    disabled={savingReferral}
+                    onChange={(id) => { setVendorId(id); setPickedCode(''); setManualCode(''); }}
+                  />
+                   <Select value={pickedCode || 'none'} onValueChange={(v) => { setPickedCode(v === 'none' ? '' : v); setManualCode(''); }} disabled={!vendorId || !linksForExperience.length || linksLoading || savingReferral}>
                     <SelectTrigger><SelectValue placeholder={linksLoading ? 'Cargando…' : 'Código'} /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Sin código</SelectItem>
-                      {linksForPackage.map((l) => <SelectItem key={l.id} value={l.code}>{l.code}</SelectItem>)}
+                       {linksForExperience.map((l) => <SelectItem key={l.id} value={l.code}>{l.code}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <Input value={manualCode} onChange={(e) => { setManualCode(e.target.value); if (e.target.value.trim()) setPickedCode(''); }} placeholder="O código manual" disabled={savingReferral} />

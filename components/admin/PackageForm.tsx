@@ -234,7 +234,7 @@ export default function PackageForm(props: Props) {
                 maxLength={160}
               />
               <div className="flex items-center justify-between mt-1">
-                <p className="text-sm text-gray-500">Este texto se usa solo en la tarjeta de la excursion</p>
+                <p className="text-sm text-gray-500">Este texto se usa solo en la tarjeta de la experiencia</p>
                 <p className={`text-sm ${(descripcionCorta?.length || 0) > 140 ? 'text-orange-500' : 'text-gray-500'}`}>
                   {descripcionCorta?.length || 0}/160 caracteres
                 </p>
@@ -254,7 +254,7 @@ export default function PackageForm(props: Props) {
                     <RichTextEditor
                       content={field.value}
                       onChange={field.onChange}
-                      placeholder="Describe la excursion... Puedes usar negritas, listas y links."
+                      placeholder="Describí la experiencia... Podés usar negritas, listas y enlaces."
                       enableMedia={false}
                     />
                   )}
@@ -525,8 +525,8 @@ export default function PackageForm(props: Props) {
 
         <Card className="border-2">
           <CardHeader className="pb-4">
-            <CardTitle>Excursion Destacada y Orden</CardTitle>
-            <p className="text-base text-gray-500 mt-1.5">Las excursiones destacadas aparecen en la pagina de inicio (maximo 9)</p>
+            <CardTitle>Experiencia destacada y orden</CardTitle>
+            <p className="text-base text-gray-500 mt-1.5">Las experiencias destacadas aparecen en el inicio (máximo 9)</p>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-start justify-between p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
@@ -537,7 +537,7 @@ export default function PackageForm(props: Props) {
                   <div className="flex items-center gap-2 mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <p className="text-sm text-amber-700">
-                      <strong>Limite alcanzado:</strong> Ya hay {destacadosCount} excursiones destacadas. Solo se mostraran las primeras 9 en el inicio.
+                      <strong>Límite alcanzado:</strong> Ya hay {destacadosCount} experiencias destacadas. Solo se mostrarán las primeras 9 en el inicio.
                     </p>
                   </div>
                 )}
@@ -550,7 +550,7 @@ export default function PackageForm(props: Props) {
                 checked={destacado}
                 onCheckedChange={(checked) => {
                   if (checked && (mode === 'create' || !wasDestacado) && destacadosCount >= 9) {
-                    toast.warning('Ya hay 9 excursiones destacadas', {
+                    toast.warning('Ya hay 9 experiencias destacadas', {
                       description: 'Solo se mostraran los primeros 9 en el inicio (ordenados por numero de orden)',
                     });
                   }
@@ -564,7 +564,7 @@ export default function PackageForm(props: Props) {
               mode === 'create' ? (
                 titulo && titulo.length >= 5 ? (
                   <DragDropOrderManager
-                    collectionName="paquetes"
+                    collectionName="experiencias"
                     currentId={undefined}
                     newItemName={titulo}
                     onPositionChange={onSelectedDestacadoPositionChange}
@@ -578,11 +578,11 @@ export default function PackageForm(props: Props) {
                   </div>
                 )
               ) : (
-                <DragDropOrderManager collectionName="paquetes" currentId={currentId} maxItems={9} onlyDestacados />
+                <DragDropOrderManager collectionName="experiencias" currentId={currentId} maxItems={9} onlyDestacados />
               )
             ) : (
               <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
-                <p className="text-base text-blue-700 font-medium">Marca la excursion como destacada para gestionar su orden de aparicion</p>
+                <p className="text-base text-blue-700 font-medium">Marcá la experiencia como destacada para gestionar su orden de aparición</p>
               </div>
             )}
           </CardContent>
@@ -743,7 +743,7 @@ export default function PackageForm(props: Props) {
           <CardContent className="space-y-4">
             <div className="flex items-start justify-between py-3 border-b">
               <div className="space-y-0.5">
-                <Label htmlFor="visible" className="text-lg font-medium cursor-pointer">Excursion visible</Label>
+                <Label htmlFor="visible" className="text-lg font-medium cursor-pointer">Experiencia visible</Label>
                 <p className="text-sm text-gray-500 pr-4">Activar para que sea visible en el sitio web</p>
               </div>
               <Switch id="visible" checked={visible} onCheckedChange={(checked) => setValue('visible', checked)} className="mt-0.5" />
@@ -928,7 +928,7 @@ export default function PackageForm(props: Props) {
 
         <Card id="imagenes-section">
           <CardHeader className="pb-4">
-            <CardTitle>Imagenes de la Excursion</CardTitle>
+            <CardTitle>Imágenes de la experiencia</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             <ImageUploader
@@ -943,21 +943,21 @@ export default function PackageForm(props: Props) {
               onImagesChange={onImagenPortadaMobileChange}
               maxImages={1}
               label="Imagen de portada mobile *"
-              description="Se usa en el hero mobile de la excursion. Medida recomendada: 1080x1350 px."
+              description="Se usa en el hero móvil de la experiencia. Medida recomendada: 1080x1350 px."
             />
             <ImageUploader
               images={imagenPortadaDesktopPreview}
               onImagesChange={onImagenPortadaDesktopChange}
               maxImages={1}
               label="Imagen de portada PC *"
-              description="Se usa en el hero desktop de la excursion. Medida recomendada: 1920x900 px."
+              description="Se usa en el hero desktop de la experiencia. Medida recomendada: 1920x900 px."
             />
             <ImageUploader
               images={galeriaPreview}
               onImagesChange={onGaleriaChange}
               maxImages={8}
               label="Galeria de imagenes"
-              description="Imagenes adicionales para la galeria de la excursion."
+              description="Imágenes adicionales para la galería de la experiencia."
             />
           </CardContent>
         </Card>

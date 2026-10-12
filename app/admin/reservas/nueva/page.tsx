@@ -9,24 +9,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import AdminReservaForm from '@/components/admin/AdminReservaForm';
-import { getPaquetes } from '@/lib/paquetes';
-import type { Paquete } from '@/types';
+import { getExperiencias } from '@/lib/experiencias-catalog';
+import type { ExperienciaCatalogo } from '@/types';
 
 export default function AdminReservaNuevaPage() {
-  const [paquetes, setPaquetes] = useState<Paquete[]>([]);
+  const [experiencias, setExperiencias] = useState<ExperienciaCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let isCancelled = false;
-    const fetchPaquetes = async () => {
+    const fetchExperiencias = async () => {
       try {
-        const data = await getPaquetes();
+        const data = await getExperiencias();
         if (!isCancelled) {
-          setPaquetes(data);
+          setExperiencias(data);
         }
       } catch (error) {
-        console.error('[admin/reservas/nueva] Error cargando paquetes:', error);
-        toast.error('No pudimos cargar los paquetes disponibles');
+        console.error('[admin/reservas/nueva] Error cargando experiencias:', error);
+        toast.error('No pudimos cargar las experiencias disponibles');
       } finally {
         if (!isCancelled) {
           setLoading(false);
@@ -34,7 +34,7 @@ export default function AdminReservaNuevaPage() {
       }
     };
 
-    fetchPaquetes();
+    fetchExperiencias();
     return () => {
       isCancelled = true;
     };
@@ -61,25 +61,25 @@ export default function AdminReservaNuevaPage() {
                 </div>
               </div>
             </div>
-          ) : paquetes.length === 0 ? (
+          ) : experiencias.length === 0 ? (
             <Card className="mx-auto max-w-xl border border-dashed border-gray-200 bg-white/80 shadow-lg">
               <CardHeader>
                 <CardTitle className="text-lg font-semibold text-gray-900">
-                  No hay paquetes aún
+                  No hay experiencias aún
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-gray-600">
                 <p>
-                  Primero necesitás crear al menos un paquete en el panel. Una vez listo, vas
+                  Primero necesitás crear al menos una experiencia en el panel. Una vez lista, vas
                   a poder crear ventas manuales sin pasar por el checkout.
                 </p>
                 <Button asChild variant="default">
-                  <Link href="/admin/experiencias/nuevo">Crear nuevo paquete</Link>
+                  <Link href="/admin/experiencias/nuevo">Crear experiencia</Link>
                 </Button>
               </CardContent>
             </Card>
           ) : (
-            <AdminReservaForm paquetes={paquetes} />
+            <AdminReservaForm experiencias={experiencias} />
           )}
         </div>
       </AdminLayout>

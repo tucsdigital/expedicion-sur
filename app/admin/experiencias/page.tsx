@@ -2,19 +2,19 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { collection, getDocs, deleteDoc, doc, orderBy, query, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, getAuthInstance } from '@/lib/firebase';
 import { Paquete } from '@/types';
 import { deleteBlobByKey, getBlobKeyFromUrl } from '@/lib/utils/blob';
 import { duplicatePaquete } from '@/lib/duplicatePaquete';
 import { revalidateFrontPaths } from '@/lib/revalidate';
 import { fetchActiveCategorias } from '@/lib/packages/admin-queries';
-import { syncPackageCategoryData } from '@/lib/packages/category-utils';
+import { normalizeExperienciaCatalogo } from '@/lib/experiencias-catalog';
 import ProtectedRoute from '@/components/admin/ProtectedRoute';
 import AdminLayout from '@/components/admin/AdminLayout';
 import AdminPagination from '@/components/admin/AdminPagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Loader2, Search, X, User, Users, Sparkles, Globe2, GraduationCap, CheckCircle2, XCircle, Star, Music } from 'lucide-react';
+import { Plus, Loader2, Search, X, User, Users, Sparkles, Globe2, GraduationCap, CheckCircle2, XCircle, Star, Music, Database } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -88,6 +88,7 @@ export default function PaquetesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [duplicateId, setDuplicateId] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState(false);
+  const [migratingCatalog, setMigratingCatalog] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
@@ -105,18 +106,64 @@ export default function PaquetesPage() {
   const fetchPaquetes = async () => {
     try {
       const [snapshot, categorias] = await Promise.all([
-        getDocs(query(collection(db, 'paquetes'), orderBy('orden', 'asc'))),
+        getDocs(query(collection(db, 'experiencias'), orderBy('orden', 'asc'))),
         fetchActiveCategorias(),
       ]);
       const data = snapshot.docs.map((doc) =>
-        syncPackageCategoryData({ id: doc.id, ...doc.data() } as Paquete, categorias)
+        normalizeExperienciaCatalogo({ id: doc.id, ...doc.data() } as Paquete, categorias)
       );
       setPaquetes(data);
     } catch (error) {
-      console.error('Error fetching paquetes:', error);
-      toast.error('Error al cargar paquetes');
+      console.error('Error cargando experiencias:', error);
+      toast.error('Error al cargar experiencias');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const migrateLegacyCatalog = async () => {
+    const user = getAuthInstance().currentUser;
+    if (!user) {
+      toast.error('Iniciá sesión para migrar el catálogo.');
+      return;
+    }
+    setMigratingCatalog(true);
+    try {
+      const token = await user.getIdToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      const previewResponse = await fetch('/api/admin/experiencias/migracion', { headers, cache: 'no-store' });
+      const preview = await previewResponse.json().catch(() => null);
+      if (!previewResponse.ok) throw new Error(preview?.error || 'No se pudo revisar el catálogo anterior.');
+      if (!preview.documentsToCopy) {
+        toast.info(preview.existingIdsSkipped
+          ? `No hay documentos nuevos para copiar; ${preview.existingIdsSkipped} IDs ya existen y no se modificaron.`
+          : 'No hay experiencias anteriores para copiar.');
+        return;
+      }
+      const conflicts = Number(preview.existingIdsSkipped) || 0;
+      const conflictList = Array.isArray(preview.conflictIds) && preview.conflictIds.length
+        ? ` IDs en conflicto: ${preview.conflictIds.slice(0, 8).join(', ')}${preview.conflictIdsTruncated ? '…' : ''}.`
+        : '';
+      const message = `Se copiarán ${preview.documentsToCopy} experiencias, conservando sus IDs y sin borrar el catálogo anterior. ${conflicts} IDs existentes se omitirán sin sobrescribir.${conflictList} ¿Continuar?`;
+      if (!window.confirm(message)) return;
+
+      const response = await fetch('/api/admin/experiencias/migracion', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || 'No se pudo copiar el catálogo anterior.');
+      if (result.skippedExisting > 0) {
+        toast.warning(`${result.copied} experiencias copiadas. ${result.skippedExisting} IDs existentes se dejaron intactos; revisá los conflictos antes de asignarlos a ventas.`);
+      } else {
+        toast.success(`${result.copied} experiencias copiadas; no hubo conflictos.`);
+      }
+      await fetchPaquetes();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo completar la migración.');
+    } finally {
+      setMigratingCatalog(false);
     }
   };
 
@@ -128,7 +175,7 @@ export default function PaquetesPage() {
     if (!deleteId) return;
 
     try {
-      const paqueteDoc = await getDoc(doc(db, 'paquetes', deleteId));
+      const paqueteDoc = await getDoc(doc(db, 'experiencias', deleteId));
       if (paqueteDoc.exists()) {
         const paqueteData = paqueteDoc.data() as Paquete;
         const keysToDelete = new Set<string>();
@@ -166,17 +213,17 @@ export default function PaquetesPage() {
             toast.success(`${deletedCount} imágenes eliminadas de R2`, { id: 'delete-images' });
             toast.dismiss('delete-images');
           } else {
-            toast.warning('Paquete eliminado, pero hubo errores al eliminar las imágenes', { id: 'delete-images' });
+              toast.warning('Experiencia eliminada, pero hubo errores al eliminar las imágenes', { id: 'delete-images' });
           }
         }
       }
 
-      await deleteDoc(doc(db, 'paquetes', deleteId));
-      toast.success('Paquete eliminado correctamente');
+      await deleteDoc(doc(db, 'experiencias', deleteId));
+      toast.success('Experiencia eliminada correctamente');
       fetchPaquetes();
     } catch (error) {
-      console.error('Error deleting paquete:', error);
-      toast.error('Error al eliminar paquete');
+      console.error('Error eliminando experiencia:', error);
+      toast.error('Error al eliminar la experiencia');
     } finally {
       setDeleteId(null);
     }
@@ -199,12 +246,12 @@ export default function PaquetesPage() {
         setCurrentPage(Math.floor(visibleIndex / itemsPerPage) + 1);
       }
 
-      toast.success('Excursión duplicada correctamente', {
+      toast.success('Experiencia duplicada correctamente', {
         description: `Se creó "${result.paquete.titulo}" con un ID nuevo y todos los datos replicados.`,
       });
     } catch (error) {
-      console.error('Error duplicando paquete:', error);
-      toast.error('Error al duplicar la excursión', {
+      console.error('Error duplicando experiencia:', error);
+      toast.error('Error al duplicar la experiencia', {
         description: error instanceof Error ? error.message : 'No se pudo completar la duplicación.',
       });
     } finally {
@@ -267,7 +314,7 @@ export default function PaquetesPage() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-lg font-semibold text-gray-900 tracking-tight">Excursiones</h1>
+                <h1 className="text-lg font-semibold text-gray-900 tracking-tight">Experiencias</h1>
                 {destacadosCount > 0 && (
                   <Badge 
                     variant={destacadosCount >= 9 ? 'destructive' : 'secondary'}
@@ -286,12 +333,18 @@ export default function PaquetesPage() {
                 )}
               </p>
             </div>
-            <Button asChild className="bg-black hover:bg-gray-800 text-white">
-              <Link href="/admin/experiencias/nuevo">
-                <Plus className="mr-2 h-4 w-4" />
-                Nueva Excursion
-              </Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={migrateLegacyCatalog} disabled={migratingCatalog}>
+                {migratingCatalog ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+                Importar catálogo anterior
+              </Button>
+              <Button asChild className="bg-black hover:bg-gray-800 text-white">
+                <Link href="/admin/experiencias/nuevo">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nueva experiencia
+                </Link>
+              </Button>
+            </div>
           </div>
 
           {/* Búsqueda */}
@@ -318,7 +371,7 @@ export default function PaquetesPage() {
 
           <DragDropTable
             items={paquetesPaginados}
-            collectionName="paquetes"
+            collectionName="experiencias"
             viewPath="/experiencia"
             columns={[
               {
@@ -478,9 +531,9 @@ export default function PaquetesPage() {
         <AlertDialog open={!!duplicateId} onOpenChange={() => !duplicating && setDuplicateId(null)}>
           <AlertDialogContent className="z-[101]">
             <AlertDialogHeader>
-              <AlertDialogTitle>¿Duplicar excursión?</AlertDialogTitle>
+              <AlertDialogTitle>¿Duplicar experiencia?</AlertDialogTitle>
               <AlertDialogDescription>
-                Se creará una copia de esta excursión para que puedas editarla por separado.
+                Se creará una copia de esta experiencia para que puedas editarla por separado.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

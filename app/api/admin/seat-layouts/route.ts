@@ -4,28 +4,28 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   return legacyDisabledResponse({
-    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque los paquetes ya no usan micros ni selección de butacas.',
+    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque las experiencias no usan micros ni selección de butacas.',
     code: 'LEGACY_SEAT_LAYOUTS_DISABLED',
   });
 }
 
 export async function POST() {
   return legacyDisabledResponse({
-    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque los paquetes ya no usan micros ni selección de butacas.',
+    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque las experiencias no usan micros ni selección de butacas.',
     code: 'LEGACY_SEAT_LAYOUTS_DISABLED',
   });
 }
 
 export async function PATCH() {
   return legacyDisabledResponse({
-    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque los paquetes ya no usan micros ni selección de butacas.',
+    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque las experiencias no usan micros ni selección de butacas.',
     code: 'LEGACY_SEAT_LAYOUTS_DISABLED',
   });
 }
 
 export async function DELETE() {
   return legacyDisabledResponse({
-    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque los paquetes ya no usan micros ni selección de butacas.',
+    error: 'Las plantillas de micro fueron desactivadas en Expedicion Sur porque las experiencias no usan micros ni selección de butacas.',
     code: 'LEGACY_SEAT_LAYOUTS_DISABLED',
   });
 }

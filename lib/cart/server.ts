@@ -71,6 +71,15 @@ export async function getAvailableForPackageDate(paquete: Paquete, date: string)
   return Math.max(0, baseCapacity + delta - held);
 }
 
+// Canonical catalog terminology; old exports remain for historic callers.
+export const computeExperienceBaseCapacity = computeBaseCapacity;
+export const computeExperienceMaxPeople = computeMaxPeople;
+export const computeExperienceUnitAmount = computeUnitAmount;
+export const computeExperienceCurrency = computeCurrency;
+export const getExperienceHeldPeople = getHeldPeople;
+export const getExperienceStockDelta = getStockDelta;
+export const getAvailableForExperienceDate = getAvailableForPackageDate;
+
 export function addMinutes(ts: Timestamp, minutes: number): Timestamp {
   const ms = ts.toMillis() + minutes * 60 * 1000;
   return Timestamp.fromMillis(ms);

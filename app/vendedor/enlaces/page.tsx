@@ -1,584 +1,359 @@
-'use client';
+﻿'use client';
 
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, Copy, ExternalLink, Link2, Loader2, MoreHorizontal, Plus, Power, Search, Share2, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import VendorProtectedRoute from '@/components/vendor/VendorProtectedRoute';
 import VendorLayout from '@/components/vendor/VendorLayout';
-import { useEffect, useMemo, useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { getReferralLinksByVendor, createReferralLink, deactivateReferralLink, deleteReferralLink } from '@/lib/vendors';
+import { EmptyState, ErrorState, PageHeader, Pill, StatCard } from '@/components/vendor/parts';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import type { ReferralLink } from '@/types/vendor';
-import { Copy, Link2, Loader2, Plus, Trash2, Search, ExternalLink, Check } from 'lucide-react';
-import { toast } from 'sonner';
-import { collection, getDocs, limit, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { useAuth } from '@/hooks/useAuth';
+import { cn } from '@/lib/utils';
+import { formatDate, formatMoney, vendorFetch, type VendorLinkRow, type VendorExperienceOption } from '@/lib/vendor-client';
 
-const genCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
-const siteUrl = () => (typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || '');
-const CURRENCIES: Array<'ars' | 'brl' | 'usd'> = ['ars', 'brl', 'usd'];
+type Snapshot = { vendorId: string; links: VendorLinkRow[]; experiencias: VendorExperienceOption[] };
+const CURRENCIES = ['ars', 'brl', 'usd'] as const;
 
-export default function VendorEnlacesPage() {
+function EnlacesView() {
   const { user } = useAuth();
-  const [vendorId, setVendorId] = useState<string | null>(null);
+  const [links, setLinks] = useState<VendorLinkRow[]>([]);
+  const [experiencias, setExperiencias] = useState<VendorExperienceOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [links, setLinks] = useState<ReferralLink[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'todos' | 'activos' | 'inactivos'>('todos');
-  const [packageFilter, setPackageFilter] = useState<string>('all');
-  const [packages, setPackages] = useState<{ id: string; title: string; slug: string }[]>([]);
-  const [allowedPackages, setAllowedPackages] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [status, setStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<'recent' | 'sales'>('recent');
+
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedPackageId, setSelectedPackageId] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [pickTerm, setPickTerm] = useState('');
+  const [pickId, setPickId] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [deleteLink, setDeleteLink] = useState<VendorLinkRow | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const apply = (s: Snapshot) => {
+    setLinks(s.links);
+    setExperiencias(s.experiencias);
+  };
+
+  const api = useCallback(
+    (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: unknown) => vendorFetch<Snapshot>(user!, '/api/vendor/links', { method, body }),
+    [user]
+  );
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      apply(await api('GET'));
+    } catch (e: any) {
+      setError(e.message || 'No pudimos cargar tus enlaces');
+    } finally {
+      setLoading(false);
+    }
+  }, [user, api]);
 
   useEffect(() => {
-    const load = async () => {
-      if (!user?.email) return;
-      setLoading(true);
-      try {
-        const vq = query(collection(db, 'vendors'), where('email', '==', user.email), limit(1));
-        const vs = await getDocs(vq);
-        const v = vs.docs[0];
-        if (!v) return;
-        setVendorId(v.id);
-        const vdata = v.data() as any;
-        const allowed = Array.isArray(vdata?.allowedPackages)
-          ? (vdata.allowedPackages as string[])
-          : (Array.isArray(vdata?.allowedExperiences) ? (vdata.allowedExperiences as string[]) : null);
-        setAllowedPackages(allowed);
-        const list = await getReferralLinksByVendor(v.id);
-        setLinks(list);
-        // Cargar paquetes
-        const pkgSnap = await getDocs(collection(db, 'paquetes'));
-        const all = pkgSnap.docs
-          .map((d) => ({ id: d.id, ...(d.data() as any) }))
-          .map((e: any) => ({
-            id: e.id,
-            title: String(e.titulo ?? e.title ?? ''),
-            slug: String(e.slug ?? ''),
-          }))
-          .filter((e) => e.title && e.slug);
-        const filtered = Array.isArray(allowed) && allowed.length > 0 ? all.filter((e) => allowed.includes(e.id)) : all;
-        filtered.sort((a, b) => a.title.localeCompare(b.title, 'es'));
-        setPackages(filtered);
-      } finally {
-        setLoading(false);
-      }
-    };
     load();
-  }, [user]);
+  }, [load]);
 
-  const packagesFromLinks = useMemo(() => {
-    const set = new Map<string, string>();
-    for (const l of links) {
-      if (l.experienceId) {
-        set.set(l.experienceId, l.experienceName ?? l.experienceId);
-      }
-    }
-    return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
-  }, [links]);
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const urlFor = (l: VendorLinkRow) => `${origin}${l.experienceSlug ? `/experiencia/${encodeURIComponent(l.experienceSlug)}` : '/'}?ref=${encodeURIComponent(l.code)}`;
 
-  const filtered = useMemo(() => {
-    return links.filter((l) => {
-      const statusOk =
-        statusFilter === 'todos' ||
-        (statusFilter === 'activos' && l.active) ||
-        (statusFilter === 'inactivos' && !l.active);
-      const expOk = packageFilter === 'all' || l.experienceId === packageFilter;
-      return statusOk && expOk;
+  const usedExperienceIds = useMemo(() => new Set(links.map((l) => l.experienceId).filter(Boolean) as string[]), [links]);
+  const availableExperiences = useMemo(() => {
+    const t = pickTerm.trim().toLowerCase();
+    return experiencias.filter((experience) => !usedExperienceIds.has(experience.id) && (!t || `${experience.title} ${experience.slug}`.toLowerCase().includes(t)));
+  }, [experiencias, usedExperienceIds, pickTerm]);
+
+  const visible = useMemo(() => {
+    const t = query.trim().toLowerCase();
+    const list = links.filter((l) => {
+      if (status === 'active' && !l.active) return false;
+      if (status === 'inactive' && l.active) return false;
+      return !t || `${l.code} ${l.experienceName}`.toLowerCase().includes(t);
     });
-  }, [links, statusFilter, packageFilter]);
+    return list.sort((a, b) => (sort === 'sales' ? b.salesCount - a.salesCount : String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))));
+  }, [links, status, query, sort]);
 
-  const availablePackages = useMemo(() => {
-    const taken = new Set(links.map(l => l.experienceId).filter(Boolean) as string[]);
-    const list = packages.filter(e => !taken.has(e.id));
-    return list;
-  }, [packages, links]);
+  const totalSales = links.reduce((acc, l) => acc + l.salesCount, 0);
 
-  const filteredCreatePackages = useMemo(() => {
-    if (!searchTerm) return availablePackages;
-    const lower = searchTerm.toLowerCase();
-    return availablePackages.filter(e => 
-      e.title.toLowerCase().includes(lower) || 
-      e.slug.toLowerCase().includes(lower)
-    );
-  }, [availablePackages, searchTerm]);
-
-  const nf = (currency: 'ARS' | 'BRL' | 'USD') =>
-    new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 });
-  const toUnits = (cents?: number) => (typeof cents === 'number' ? cents / 100 : 0);
-  const currencyLabel = (c: 'ars' | 'brl' | 'usd') => (c === 'ars' ? 'ARS' : c === 'brl' ? 'BRL' : 'USD');
-  const normalizeSiteUrl = (u: string) => (u.endsWith('/') ? u.slice(0, -1) : u);
-
-  const publicUrlForLink = (l: ReferralLink) => {
-    const base = normalizeSiteUrl(siteUrl());
-    const slug =
-      l.experienceSlug ||
-      (l.experienceId ? packages.find((e) => e.id === l.experienceId)?.slug : undefined);
-    const path = slug ? `/experiencia/${encodeURIComponent(slug)}` : '/';
-    return `${base}${path}?ref=${encodeURIComponent(l.code)}`;
-  };
-
-  const exportCsv = () => {
-    const rows: string[] = [];
-    const header = [
-      'Codigo',
-      'Paquete',
-      'Estado',
-      'Ventas',
-      'Ingresos ARS',
-      'Ingresos BRL',
-      'Ingresos USD',
-      'Comision ARS',
-      'Comision BRL',
-      'Comision USD',
-      'Creado',
-      'URL',
-    ];
-    rows.push(header.join(','));
-    const formatDate = (v: any) => {
-      try {
-        if (!v) return '';
-        if (typeof v === 'string') return new Date(v).toISOString();
-        if (v && typeof v.toDate === 'function') return v.toDate().toISOString();
-        if ('seconds' in v) return new Date((v.seconds ?? 0) * 1000).toISOString();
-      } catch {}
-      return '';
-    };
-    for (const l of filtered) {
-      const r = l.revenueByCurrency ?? {};
-      const k = l.commissionByCurrency ?? {};
-      const row = [
-        `"${l.code}"`,
-        `"${l.experienceName ?? (l.experienceId ? l.experienceId : 'Todos')}"`,
-        l.active ? 'Activo' : 'Inactivo',
-        `${l.salesCount ?? 0}`,
-        `${toUnits(r.ars ?? 0)}`,
-        `${toUnits(r.brl ?? 0)}`,
-        `${toUnits(r.usd ?? 0)}`,
-        `${toUnits(k.ars ?? 0)}`,
-        `${toUnits(k.brl ?? 0)}`,
-        `${toUnits(k.usd ?? 0)}`,
-        `"${formatDate((l as any).createdAt)}"`,
-        `"${publicUrlForLink(l)}"`,
-      ];
-      rows.push(row.join(','));
-    }
-    const csv = '\uFEFF' + rows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mis-enlaces.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const openCreateDialog = () => {
-    if (availablePackages.length === 0) {
-      toast.info('Ya tenés enlaces para todas las experiencias habilitadas');
-      return;
-    }
-    setSelectedPackageId('');
-    setSearchTerm('');
-    setCreateOpen(true);
-  };
-
-  const createLinkConfirmed = async () => {
-    if (!vendorId) return;
-    const expId = selectedPackageId.trim();
-    if (!expId) {
-      toast.error('Seleccioná una excursión');
-      return;
-    }
-    if (links.some((l) => l.experienceId === expId)) {
-      toast.error('Ya tenés un enlace para esa excursión');
-      return;
-    }
-    if (Array.isArray(allowedPackages) && allowedPackages.length > 0 && !allowedPackages.includes(expId)) {
-      toast.error('No estás autorizado para esa excursión');
-      return;
-    }
-    setCreating(true);
+  const run = async (key: string, fn: () => Promise<Snapshot>, ok: string) => {
+    setBusy(key);
     try {
-      let attempts = 0;
-      while (attempts < 5) {
-        try {
-          const code = genCode();
-          await createReferralLink({
-            vendorId,
-            code,
-            active: true,
-            utm: null,
-            experienceId: expId,
-          });
-          const list = await getReferralLinksByVendor(vendorId);
-          setLinks(list);
-          toast.success('Enlace creado');
-          setCreateOpen(false);
-          return;
-        } catch (e: any) {
-          const msg = e?.message ?? '';
-          if (msg === 'CODE_TAKEN') {
-            attempts++;
-            continue;
-          }
-          if (msg === 'DUPLICATE_EXPERIENCE') {
-            toast.error('Ya existe un enlace para esa excursión');
-            return;
-          }
-          if (msg === 'NOT_ALLOWED_EXPERIENCE') {
-            toast.error('No tenés permiso para esa excursión');
-            return;
-          }
-          if (msg === 'MISSING_EXPERIENCE') {
-            toast.error('Falta la excursión');
-            return;
-          }
-          throw e;
-        }
-      }
-      toast.error('No se pudo generar un código único. Probá nuevamente.');
-    } catch {
-      toast.error('No se pudo crear el enlace');
+      apply(await fn());
+      toast.success(ok);
+      return true;
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo completar la acción');
+      return false;
     } finally {
-      setCreating(false);
+      setBusy(null);
     }
   };
 
-  const copyLink = async (l: ReferralLink) => {
+  const create = async () => {
+    if (!pickId) return;
+    if (await run('create', () => api('POST', { experienceId: pickId }), 'Enlace creado')) {
+      setCreateOpen(false);
+      setPickId('');
+    }
+  };
+
+  const copy = async (l: VendorLinkRow) => {
     try {
-      const url = publicUrlForLink(l);
-      await navigator.clipboard.writeText(url);
-      toast.success('Enlace copiado');
+      await navigator.clipboard.writeText(urlFor(l));
+      setCopied(l.id);
+      setTimeout(() => setCopied((c) => (c === l.id ? null : c)), 1800);
     } catch {
       toast.error('No se pudo copiar el enlace');
     }
   };
 
-  
-
-  const deactivate = async (id: string) => {
-    if (!vendorId) return;
-    try {
-      await deactivateReferralLink(id);
-      const list = await getReferralLinksByVendor(vendorId);
-      setLinks(list);
-      toast.success('Enlace desactivado');
-    } catch {
-      toast.error('No se pudo desactivar');
+  const share = async (l: VendorLinkRow) => {
+    const text = `${l.experienceName}: ${urlFor(l)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: l.experienceName, text, url: urlFor(l) });
+        return;
+      } catch {
+        /* cancelado */
+      }
     }
-  };
-
-  const requestDelete = (l: ReferralLink) => {
-    if ((l.salesCount ?? 0) > 0) {
-      toast.error('No podés eliminar un enlace con ventas. Podés desactivarlo.');
-      return;
-    }
-    setDeleteId(l.id);
-  };
-
-  const confirmDelete = async () => {
-    if (!vendorId || !deleteId) return;
-    try {
-      await deleteReferralLink(deleteId);
-      const list = await getReferralLinksByVendor(vendorId);
-      setLinks(list);
-      toast.success('Enlace eliminado');
-    } catch {
-      toast.error('No se pudo eliminar el enlace');
-    } finally {
-      setDeleteId(null);
-    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <VendorProtectedRoute>
-      <VendorLayout>
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-gray-900">Mis enlaces</h1>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={exportCsv}>Exportar CSV</Button>
-              <Button onClick={openCreateDialog} className="gap-2" disabled={availablePackages.length === 0}>
-                <Plus className="h-4 w-4" />
-                Nuevo enlace
-              </Button>
-            </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Mis enlaces"
+        description="Un enlace único por experiencia. Las ventas hechas desde él quedan asociadas a vos."
+        actions={
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => {
+              setPickId('');
+              setPickTerm('');
+              setCreateOpen(true);
+            }}
+            disabled={loading || !!error}
+          >
+            <Plus className="h-4 w-4" /> Nuevo enlace
+          </Button>
+        }
+      />
+
+      {error ? (
+        <ErrorState message={error} onRetry={load} />
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label="Enlaces" value={loading ? '—' : links.length} hint={`${links.filter((l) => l.active).length} activos`} icon={<Link2 className="h-4 w-4" />} />
+            <StatCard label="Ventas por enlace" value={loading ? '—' : totalSales} hint="Sin contar canceladas" />
+            <StatCard label="Experiencias disponibles" value={loading ? '—' : Math.max(0, experiencias.length - usedExperienceIds.size)} hint="Sin enlace todavía" />
           </div>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Códigos de referido</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">Estado</span>
-                  <select
-                    className="border rounded-md px-2 py-1 text-sm"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as any)}
-                  >
-                    <option value="todos">Todos</option>
-                    <option value="activos">Activos</option>
-                    <option value="inactivos">Inactivos</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">Excursión</span>
-                  <select
-                    className="border rounded-md px-2 py-1 text-sm"
-                    value={packageFilter}
-                    onChange={(e) => setPackageFilter(e.target.value)}
-                  >
-                    <option value="all">Todos</option>
-                    {packagesFromLinks.map((e) => (
-                      <option key={e.id} value={e.id}>{e.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {loading ? (
-                <div className="p-4 space-y-3">
-                  <div className="grid grid-cols-9 gap-3">
-                    {Array.from({ length: 9 }).map((_, i) => (
-                      <div key={`head-${i}`} className="h-4 bg-gray-200 rounded animate-pulse" />
-                    ))}
-                  </div>
-                  {Array.from({ length: 6 }).map((_, r) => (
-                    <div key={`row-${r}`} className="grid grid-cols-9 gap-3">
-                      {Array.from({ length: 9 }).map((__, c) => (
-                        <div key={`cell-${r}-${c}`} className="h-4 bg-gray-200 rounded animate-pulse" />
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ) : filtered.length === 0 ? (
-                <p className="text-sm text-gray-600">Aún no tenés enlaces. Creá el primero.</p>
-              ) : (
-                <div className="rounded-lg border border-gray-200 overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium">Código</th>
-                        <th className="px-4 py-3 text-left font-medium">Enlace</th>
-                        <th className="px-4 py-3 text-left font-medium">Paquete</th>
-                        <th className="px-4 py-3 text-left font-medium">Ventas</th>
-                        <th className="px-4 py-3 text-left font-medium">Ingresos</th>
-                        <th className="px-4 py-3 text-left font-medium">Comisión</th>
-                        <th className="px-4 py-3 text-left font-medium">Estado</th>
-                        <th className="px-4 py-3 text-left font-medium">Creado</th>
-                        <th className="px-4 py-3 text-left font-medium">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map(l => (
-                        <tr key={l.id} className="border-t border-gray-100">
-                          <td className="px-4 py-3 font-mono">{l.code}</td>
-                          <td className="px-4 py-3">
-                            <a
-                              href={publicUrlForLink(l)}
-                              className="text-primary hover:underline"
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {publicUrlForLink(l)}
-                            </a>
-                          </td>
-                          <td className="px-4 py-3">{l.experienceName ?? 'Todos'}</td>
-                          <td className="px-4 py-3">{typeof l.salesCount === 'number' ? l.salesCount : 0}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {CURRENCIES.map(c => {
-                                const v = l.revenueByCurrency?.[c] ?? 0;
-                                if (!v) return null;
-                                const cur = currencyLabel(c) as 'ARS'|'BRL'|'USD';
-                                return (
-                                  <span key={c} className="inline-block rounded bg-gray-100 px-2 py-0.5">
-                                    {nf(cur).format(toUnits(v))}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {CURRENCIES.map(c => {
-                                const v = l.commissionByCurrency?.[c] ?? 0;
-                                if (!v) return null;
-                                const cur = currencyLabel(c) as 'ARS'|'BRL'|'USD';
-                                return (
-                                  <span key={c} className="inline-block rounded bg-emerald-50 text-emerald-800 px-2 py-0.5">
-                                    {nf(cur).format(toUnits(v))}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">{l.active ? <Badge variant="secondary">Activo</Badge> : <Badge variant="outline">Inactivo</Badge>}</td>
-                          <td className="px-4 py-3">
-                            {(() => {
-                              const v: any = (l as any).createdAt;
-                              if (!v) return '—';
-                              try {
-                                if (typeof v === 'string') return new Date(v).toLocaleDateString();
-                                if (v && typeof v.toDate === 'function') return v.toDate().toLocaleDateString();
-                                if ('seconds' in v) return new Date((v.seconds ?? 0) * 1000).toLocaleDateString();
-                              } catch {}
-                              return '—';
-                            })()}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <Button variant="ghost" size="sm" onClick={() => copyLink(l)} className="gap-2">
-                                <Copy className="h-4 w-4" /> Copiar enlace
-                              </Button>
-                              {l.active && (
-                                <Button variant="ghost" size="sm" onClick={() => deactivate(l.id)} className="gap-2 text-red-600 hover:text-red-700">
-                                  <Trash2 className="h-4 w-4" /> Desactivar
-                                </Button>
-                              )}
-                              {!l.active && (
-                                <Button variant="ghost" size="sm" onClick={() => requestDelete(l)} className="gap-2 text-red-600 hover:text-red-700">
-                                  <Trash2 className="h-4 w-4" /> Eliminar
-                                </Button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <p className="mt-3 text-xs text-gray-500 flex items-center gap-2">
-                <Link2 className="h-4 w-4" /> Compartí el link y tus ventas quedarán registradas automáticamente.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </VendorLayout>
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-xl bg-white p-0 gap-0 overflow-hidden flex flex-col max-h-[90vh]">
-          <DialogHeader className="px-6 py-4 border-b">
-            <DialogTitle>Nuevo enlace de referido</DialogTitle>
-            <p className="text-sm text-gray-500 font-normal">
-              Elegí un paquete para generar tu enlace único.
-            </p>
-          </DialogHeader>
-          
-          <div className="p-4 space-y-4 overflow-y-auto flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input 
-                placeholder="Buscar paquete..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 bg-gray-50"
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input className="pl-8" placeholder="Buscar por código o experiencia…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </div>
+            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
+              {([['all', 'Todos'], ['active', 'Activos'], ['inactive', 'Inactivos']] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setStatus(k)} className={cn('rounded-md px-3 py-1.5 font-medium transition-colors', status === k ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <select className="h-9 rounded-md border border-input bg-white px-2.5 text-sm" value={sort} onChange={(e) => setSort(e.target.value as any)} aria-label="Ordenar">
+              <option value="recent">Más recientes</option>
+              <option value="sales">Más ventas</option>
+            </select>
+          </div>
+
+          {loading ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-56 animate-pulse rounded-xl bg-gray-100" />
+              ))}
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white">
+              <EmptyState
+                title={links.length === 0 ? 'Todavía no tenés enlaces' : 'Sin resultados'}
+                description={links.length === 0 ? 'Creá un enlace para una experiencia y empezá a compartirlo.' : 'Probá con otro filtro o búsqueda.'}
+                action={
+                  links.length === 0 && experiencias.length > 0 ? (
+                    <Button size="sm" onClick={() => setCreateOpen(true)}>
+                      Crear mi primer enlace
+                    </Button>
+                  ) : undefined
+                }
               />
             </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {visible.map((l) => {
+                const url = urlFor(l);
+                const revenue = CURRENCIES.filter((c) => l.revenueByCurrency[c]);
+                const commission = CURRENCIES.filter((c) => l.commissionByCurrency[c]);
+                return (
+                  <article key={l.id} className={cn('flex flex-col rounded-xl border bg-white p-4 shadow-sm transition-opacity', l.active ? 'border-gray-200' : 'border-gray-200 opacity-75')}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-gray-900" title={l.experienceName}>{l.experienceName}</h3>
+                        <p className="mt-0.5 text-xs text-gray-500">Creado {formatDate(l.createdAt)}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Pill tone={l.active ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}>{l.active ? 'Activo' : 'Inactivo'}</Pill>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label="Más acciones" disabled={busy === l.id}>
+                              {busy === l.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-[200px] bg-white">
+                            <DropdownMenuItem onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>
+                              <ExternalLink className="h-4 w-4" /> Abrir experiencia
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => run(l.id, () => api('PATCH', { linkId: l.id, active: !l.active }), l.active ? 'Enlace desactivado' : 'Enlace activado')}>
+                              <Power className="h-4 w-4" /> {l.active ? 'Desactivar' : 'Activar'}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              disabled={l.salesCount > 0}
+                              onClick={() => setDeleteLink(l)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4" /> {l.salesCount > 0 ? 'Eliminar (tiene ventas)' : 'Eliminar'}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
 
-            <div className="space-y-1">
-              {filteredCreatePackages.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 text-sm">
-                  No se encontraron experiencias
-                </div>
-              ) : (
-                filteredCreatePackages.map((e) => (
-                  <div
-                    key={e.id}
-                    onClick={() => setSelectedPackageId(e.id)}
-                    className={cn(
-                      "group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all border",
-                      selectedPackageId === e.id 
-                        ? "bg-blue-50 border-blue-200 ring-1 ring-blue-200" 
-                        : "bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50"
-                    )}
-                  >
-                    <div className="flex-1 min-w-0 pr-4">
-                      <div className={cn(
-                        "font-medium text-sm truncate",
-                        selectedPackageId === e.id ? "text-blue-700" : "text-gray-900"
-                      )}>
-                        {e.title}
+                    <div className="mt-3 rounded-lg bg-gray-50 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-base font-semibold tracking-wider text-gray-900">{l.code}</span>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="outline" className="h-8 gap-1.5 px-2.5" onClick={() => copy(l)}>
+                            {copied === l.id ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                            {copied === l.id ? 'Copiado' : 'Copiar'}
+                          </Button>
+                          <Button size="icon-sm" variant="outline" className="h-8 w-8" onClick={() => share(l)} aria-label="Compartir">
+                            <Share2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500 truncate mt-0.5">
-                        /{e.slug}
-                      </div>
+                      <p className="mt-2 truncate text-xs text-gray-500" title={url}>{url}</p>
                     </div>
-                    
-                    <div className="flex items-center gap-3 shrink-0">
-                      <a
-                        href={`${siteUrl()}/experiencia/${e.slug}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(ev) => ev.stopPropagation()}
-                        className="text-gray-400 hover:text-blue-600 transition-colors p-1.5 hover:bg-blue-50 rounded-full"
-                        title="Ver página de la excursión"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                      <div className={cn(
-                        "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
-                        selectedPackageId === e.id
-                          ? "bg-blue-600 border-blue-600 text-white"
-                          : "border-gray-300 bg-white"
-                      )}>
-                        {selectedPackageId === e.id && <Check className="h-3 w-3" />}
+
+                    <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="rounded-lg border border-gray-100 p-2">
+                        <dt className="text-[11px] uppercase tracking-wide text-gray-500">Ventas</dt>
+                        <dd className="mt-0.5 text-sm font-semibold">{l.salesCount}</dd>
                       </div>
-                    </div>
-                  </div>
-                ))
-              )}
+                      <div className="rounded-lg border border-gray-100 p-2">
+                        <dt className="text-[11px] uppercase tracking-wide text-gray-500">Ingresos</dt>
+                        <dd className="mt-0.5 space-y-0.5 text-xs font-semibold">{revenue.length ? revenue.map((c) => <div key={c}>{formatMoney(l.revenueByCurrency[c], c)}</div>) : '—'}</dd>
+                      </div>
+                      <div className="rounded-lg border border-gray-100 p-2">
+                        <dt className="text-[11px] uppercase tracking-wide text-gray-500">Comisión</dt>
+                        <dd className="mt-0.5 space-y-0.5 text-xs font-semibold text-emerald-700">{commission.length ? commission.map((c) => <div key={c}>{formatMoney(l.commissionByCurrency[c], c)}</div>) : '—'}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                );
+              })}
             </div>
-          </div>
+          )}
+        </>
+      )}
 
-          <DialogFooter className="px-6 py-4 border-t bg-gray-50">
-            <div className="flex items-center justify-between w-full">
-              <p className="text-xs text-gray-500">
-                {selectedPackageId ? '1 paquete seleccionado' : 'Ningún paquete seleccionado'}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden bg-white p-0 sm:max-w-xl">
+          <DialogHeader className="border-b px-6 py-4">
+            <DialogTitle>Nuevo enlace de referido</DialogTitle>
+            <DialogDescription>Elegí la experiencia para generar tu enlace único.</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input placeholder="Buscar experiencia…" value={pickTerm} onChange={(e) => setPickTerm(e.target.value)} className="bg-gray-50 pl-9" autoFocus />
+            </div>
+            {availableExperiences.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-500">
+                {experiencias.length === 0 ? 'No tenés experiencias habilitadas todavía.' : usedExperienceIds.size >= experiencias.length ? 'Ya tenés un enlace para todas tus experiencias.' : 'No se encontraron experiencias.'}
               </p>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setCreateOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button 
-                  onClick={createLinkConfirmed} 
-                  disabled={creating || !selectedPackageId} 
-                  className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Generar enlace
-                </Button>
-              </div>
-            </div>
+            ) : (
+              <ul className="space-y-1" role="listbox">
+                {availableExperiences.map((experience) => (
+                  <li key={experience.id}>
+                    <button
+                      type="button"
+                      onClick={() => setPickId(experience.id)}
+                      className={cn('flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors', pickId === experience.id ? 'border-blue-200 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50')}
+                    >
+                      <span className="min-w-0">
+                        <span className={cn('block truncate text-sm font-medium', pickId === experience.id ? 'text-blue-700' : 'text-gray-900')}>{experience.title}</span>
+                        <span className="block truncate text-xs text-gray-500">/{experience.slug}</span>
+                      </span>
+                      <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-full border', pickId === experience.id ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300')}>
+                        {pickId === experience.id && <Check className="h-3 w-3" />}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <DialogFooter className="border-t bg-gray-50 px-6 py-4">
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>
+            <Button onClick={create} disabled={!pickId || busy === 'create'} className="gap-2">
+              {busy === 'create' && <Loader2 className="h-4 w-4 animate-spin" />} Generar enlace
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+
+      <AlertDialog open={!!deleteLink} onOpenChange={(o) => !o && setDeleteLink(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar enlace definitivamente?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. El enlace dejará de existir y no podrá usarse.
-            </AlertDialogDescription>
+            <AlertDialogTitle>¿Eliminar el enlace {deleteLink?.code}?</AlertDialogTitle>
+            <AlertDialogDescription>Dejará de existir y no se podrá usar. Si solo querés pausarlo, desactivalo.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 text-white">
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              onClick={() => {
+                const l = deleteLink;
+                setDeleteLink(null);
+                if (l) run(l.id, () => api('DELETE', { linkId: l.id }), 'Enlace eliminado');
+              }}
+            >
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+export default function VendorEnlacesPage() {
+  return (
+    <VendorProtectedRoute>
+      <VendorLayout>
+        <EnlacesView />
+      </VendorLayout>
     </VendorProtectedRoute>
   );
 }

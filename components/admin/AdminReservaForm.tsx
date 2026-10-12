@@ -24,26 +24,27 @@ import type {
   ReservationStatus,
   ReservationTravelerDetails,
 } from '@/components/landing-reserva/types';
-import type { Vendor, ReferralLink } from '@/types/vendor';
-import type { DepartureSeat, Paquete, SeatLayoutTemplate } from '@/types';
-import { getVendors, getReferralLinksByVendor, getVendorByEmail } from '@/lib/vendors';
-import { getAllPaquetesAdmin } from '@/lib/paquetes';
+import type { DepartureSeat, ExperienciaCatalogo, SeatLayoutTemplate } from '@/types';
+import { getVendorByEmail } from '@/lib/vendors';
+import VendorCombobox from '@/components/admin/VendorCombobox';
+import { fetchAdminVendorLinks, type AdminVendorLink } from '@/lib/admin-vendors-client';
+import { getAllExperienciasAdmin } from '@/lib/experiencias-catalog';
 import { NationalitySelect } from '@/components/ui/nationality-select';
 import { PhoneWithPrefixInput } from '@/components/ui/phone-with-prefix-input';
 import { DEFAULT_COUNTRY_NAME, applyPhonePrefix, getCountryDialCode } from '@/lib/countries';
 import SeatMap from '@/components/seats/SeatMap';
 import {
-  computeReservationPricing,
-  getOperationalDepartureDates,
-  getPackageAddonOptions,
-  getSeatLayoutExtraOptions,
-  resolveDepartureConfig,
-  resolveReservationExtraSelections,
-} from '@/lib/packages/resolve-departure';
+  computeExperiencePricing,
+  getExperienceDepartureDates,
+  getExperienceAddonOptions,
+  getExperienceSeatExtraOptions,
+  resolveExperienceDepartureConfig,
+  resolveExperienceExtraSelections,
+} from '@/lib/experience-booking';
 import { Checkbox } from '@/components/ui/checkbox';
 
 type Props = {
-  paquetes: Paquete[];
+  experiencias: ExperienciaCatalogo[];
   hideReferral?: boolean;
   hideVendorSelect?: boolean;
   hideStatus?: boolean;
@@ -51,7 +52,7 @@ type Props = {
   apiEndpoint?: string;
   successRedirect?: string;
   initialData?: {
-    packageId?: string;
+    experienceId?: string;
     date?: string;
     peopleAdults?: number;
     peopleMinors?: number;
@@ -131,11 +132,11 @@ const statusOptions: { value: ReservationStatus; label: string }[] = [
   { value: 'completed', label: 'Completada' },
 ];
 
-export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSelect, hideStatus, hideOverbook, apiEndpoint, successRedirect, initialData }: Props) {
+export default function AdminReservaForm({ experiencias, hideReferral, hideVendorSelect, hideStatus, hideOverbook, apiEndpoint, successRedirect, initialData }: Props) {
   const router = useRouter();
   const { user } = useAuth();
-  const [selectedPackageId, setSelectedPackageId] = useState<string>(
-    initialData?.packageId ?? paquetes[0]?.id ?? ''
+  const [selectedExperienceId, setSelectedExperienceId] = useState<string>(
+    initialData?.experienceId ?? experiencias[0]?.id ?? ''
   );
   const [date, setDate] = useState<string>(initialData?.date ?? 'sin-fecha');
   const [adults, setAdults] = useState<number>(() => {
@@ -172,9 +173,8 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
   const [stockInfo, setStockInfo] = useState<{ baseCapacity: number; available: number } | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [allowOverbook, setAllowOverbook] = useState(false);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorId, setVendorId] = useState<string>('');
-  const [referralLinks, setReferralLinks] = useState<ReferralLink[]>([]);
+  const [referralLinks, setReferralLinks] = useState<AdminVendorLink[]>([]);
   const [selectedReferralCode, setSelectedReferralCode] = useState<string>('');
   const [manualReferralCode, setManualReferralCode] = useState<string>('');
   const [seatDialogOpen, setSeatDialogOpen] = useState(false);
@@ -183,52 +183,34 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
   const [selectedExtraCodes, setSelectedExtraCodes] = useState<string[]>(initialData?.selectedExtraCodes ?? []);
   /**
-   * Adicionales elegidos (del paquete actual o importados de otras
-   * excursiones): se envían como `manualExtras` con precio fijado, así no
-   * dependen del catálogo del paquete destino.
+   * Adicionales elegidos de esta u otras experiencias: el precio queda fijado
+   * en la venta para no depender del catálogo después de crearla.
    */
   const [manualExtras, setManualExtras] = useState<
-    Array<{ key: string; title: string; price: number; packageTitle?: string }>
+    Array<{ key: string; title: string; price: number; experienceTitle?: string }>
   >([]);
   const [showAddonCatalog, setShowAddonCatalog] = useState(false);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [addonCatalog, setAddonCatalog] = useState<
-    Array<{ packageId: string; packageTitle: string; addon: { id: string; title: string; description: string; price: number } }>
+    Array<{ experienceId: string; experienceTitle: string; addon: { id: string; title: string; description: string; price: number } }>
   >([]);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [passengerDetails, setPassengerDetails] = useState<TravelerForm[]>([]);
 
-  const selectedPaquete = useMemo(
-    () => paquetes.find((item) => item.id === selectedPackageId) ?? null,
-    [paquetes, selectedPackageId]
+  const selectedExperience = useMemo(
+    () => experiencias.find((item) => item.id === selectedExperienceId) ?? null,
+    [experiencias, selectedExperienceId]
   );
 
   useEffect(() => {
-    if (paquetes.length > 0 && !selectedPackageId) {
-      setSelectedPackageId(paquetes[0].id);
+    if (experiencias.length > 0 && !selectedExperienceId) {
+      setSelectedExperienceId(experiencias[0].id);
     }
-  }, [paquetes, selectedPackageId]);
+  }, [experiencias, selectedExperienceId]);
 
   useEffect(() => {
     setAllowOverbook(false);
-  }, [selectedPackageId, date]);
-
-  useEffect(() => {
-    if (hideVendorSelect) return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const list = await getVendors({ activeOnly: true, limit: 200 });
-        if (!cancelled) setVendors(list);
-      } catch {
-        // ignore
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [selectedExperienceId, date]);
 
   useEffect(() => {
     if (hideReferral) return;
@@ -239,7 +221,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
         return;
       }
       try {
-        const links = await getReferralLinksByVendor(vendorId);
+        const links = await fetchAdminVendorLinks(vendorId);
         if (!cancelled) setReferralLinks(links);
       } catch {
         setReferralLinks([]);
@@ -251,14 +233,14 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
     };
   }, [vendorId]);
 
-  const referralLinksForPackage = useMemo(() => {
-    const packageId = String(selectedPaquete?.id ?? '').trim();
-    if (!packageId) return referralLinks;
+  const referralLinksForExperience = useMemo(() => {
+    const experienceId = String(selectedExperience?.id ?? '').trim();
+    if (!experienceId) return referralLinks;
     return referralLinks.filter((link) => {
-      const linkPackageId = String(link.packageId ?? link.experienceId ?? '').trim();
-      return !linkPackageId || linkPackageId === packageId;
+      const linkExperienceId = String(link.experienceId ?? '').trim();
+      return !linkExperienceId || linkExperienceId === experienceId;
     });
-  }, [referralLinks, selectedPaquete?.id]);
+  }, [referralLinks, selectedExperience?.id]);
 
   useEffect(() => {
     if (!vendorId) {
@@ -266,9 +248,9 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
       return;
     }
     if (!selectedReferralCode) return;
-    const exists = referralLinksForPackage.some((link) => link.code === selectedReferralCode);
+    const exists = referralLinksForExperience.some((link) => link.code === selectedReferralCode);
     if (!exists) setSelectedReferralCode('');
-  }, [referralLinksForPackage, selectedReferralCode, vendorId]);
+  }, [referralLinksForExperience, selectedReferralCode, vendorId]);
 
   // Asignación automática de vendor en modo vendedor (hideVendorSelect)
   useEffect(() => {
@@ -287,9 +269,9 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
   }, [hideVendorSelect, user, vendorId]);
 
   const dateOptions = useMemo<string[]>(() => {
-    if (!selectedPaquete) return [];
-    return getOperationalDepartureDates(selectedPaquete);
-  }, [selectedPaquete]);
+    if (!selectedExperience) return [];
+    return getExperienceDepartureDates(selectedExperience);
+  }, [selectedExperience]);
 
   useEffect(() => {
     if (dateOptions.length > 0) {
@@ -328,44 +310,44 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
   }, [date]);
 
   const resolvedSelectedDeparture = useMemo(() => {
-    if (!selectedPaquete) return null;
-    return resolveDepartureConfig(selectedPaquete, date);
-  }, [selectedPaquete, date]);
-  const currency = String(resolvedSelectedDeparture?.displayCurrency ?? selectedPaquete?.moneda ?? 'ARS').toUpperCase();
+    if (!selectedExperience) return null;
+    return resolveExperienceDepartureConfig(selectedExperience, date);
+  }, [selectedExperience, date]);
+  const currency = String(resolvedSelectedDeparture?.displayCurrency ?? selectedExperience?.moneda ?? 'ARS').toUpperCase();
 
-  // Al cambiar de paquete se descartan los adicionales propios (sus ids no
-  // existen en el otro), pero se conservan los importados del catálogo.
+  // Al cambiar de experiencia se descartan sus adicionales y se conservan
+  // los que se importaron desde el catálogo general.
   useEffect(() => {
     setManualExtras((prev) => prev.filter((item) => item.key.startsWith('catalog:')));
-  }, [selectedPackageId]);
+  }, [selectedExperienceId]);
 
-  // Catálogo de adicionales de TODAS las excursiones (para importar desde
+  // Catálogo de adicionales de todas las experiencias (para importar desde
   // otras). Se carga bajo demanda al abrir el buscador. Precio en unidades.
   useEffect(() => {
     if (!showAddonCatalog) return;
     let cancelled = false;
     setLoadingCatalog(true);
-    getAllPaquetesAdmin()
+    getAllExperienciasAdmin()
       .then((all) => {
         if (cancelled) return;
         const entries: Array<{
-          packageId: string;
-          packageTitle: string;
+          experienceId: string;
+          experienceTitle: string;
           addon: { id: string; title: string; description: string; price: number };
         }> = [];
-        for (const pkg of all) {
-          if (!pkg || pkg.id === selectedPackageId) continue;
-          const options = getPackageAddonOptions(pkg as any);
+        for (const experience of all) {
+          if (!experience || experience.id === selectedExperienceId) continue;
+          const options = getExperienceAddonOptions(experience as any);
           for (const option of options) {
             entries.push({
-              packageId: pkg.id,
-              packageTitle: String(pkg.titulo ?? 'Sin título'),
+              experienceId: experience.id,
+              experienceTitle: String(experience.titulo ?? 'Sin título'),
               addon: { id: option.id, title: option.title, description: option.description, price: option.price },
             });
           }
         }
         entries.sort((a, b) =>
-          a.packageTitle.localeCompare(b.packageTitle, 'es') || a.addon.title.localeCompare(b.addon.title, 'es')
+          a.experienceTitle.localeCompare(b.experienceTitle, 'es') || a.addon.title.localeCompare(b.addon.title, 'es')
         );
         setAddonCatalog(entries);
       })
@@ -378,7 +360,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
     return () => {
       cancelled = true;
     };
-  }, [showAddonCatalog, selectedPackageId]);
+  }, [showAddonCatalog, selectedExperienceId]);
 
   const filteredCatalog = useMemo(() => {
     const query = catalogQuery.trim().toLowerCase();
@@ -386,39 +368,39 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
     return addonCatalog.filter(
       (entry) =>
         entry.addon.title.toLowerCase().includes(query) ||
-        entry.packageTitle.toLowerCase().includes(query)
+        entry.experienceTitle.toLowerCase().includes(query)
     );
   }, [addonCatalog, catalogQuery]);
 
   const selectedExtras = useMemo(() => {
-    if (!selectedPaquete) return [];
-    return resolveReservationExtraSelections({
-      paquete: selectedPaquete,
+    if (!selectedExperience) return [];
+    return resolveExperienceExtraSelections({
+      experiencia: selectedExperience,
       selectedExtraCodes,
       manualExtras: manualExtras.map((item) => ({ label: item.title, amount: item.price })),
       seatLayoutTemplate: seatData?.template ?? null,
     });
-  }, [seatData?.template, manualExtras, selectedExtraCodes, selectedPaquete]);
-  const packageAddonOptions = useMemo(
-    () => (selectedPaquete ? getPackageAddonOptions(selectedPaquete) : []),
-    [selectedPaquete]
+  }, [seatData?.template, manualExtras, selectedExtraCodes, selectedExperience]);
+  const experienceAddonOptions = useMemo(
+    () => (selectedExperience ? getExperienceAddonOptions(selectedExperience) : []),
+    [selectedExperience]
   );
   const seatExtraOptions = useMemo(
-    () => getSeatLayoutExtraOptions(seatData?.template ?? null),
+    () => getExperienceSeatExtraOptions(seatData?.template ?? null),
     [seatData?.template]
   );
   const computedPricing = useMemo(() => {
-    if (!selectedPaquete) return null;
+    if (!selectedExperience) return null;
     const dpAdults = depositPercentAdults.trim() ? Number(depositPercentAdults) : NaN;
     const dpMinors = depositPercentMinors.trim() ? Number(depositPercentMinors) : NaN;
-    return computeReservationPricing(selectedPaquete, date, {
+    return computeExperiencePricing(selectedExperience, date, {
       peopleAdults: Math.max(0, Number(adults) || 0),
       peopleMinors: Math.max(0, Number(minors) || 0),
       depositPercentAdults: Number.isFinite(dpAdults) ? dpAdults : null,
       depositPercentMinors: Number.isFinite(dpMinors) ? dpMinors : null,
       selectedExtras,
     });
-  }, [adults, date, depositPercentAdults, depositPercentMinors, minors, selectedExtras, selectedPaquete]);
+  }, [adults, date, depositPercentAdults, depositPercentMinors, minors, selectedExtras, selectedExperience]);
   const amountTotal = useMemo(() => computedPricing?.subtotalAmount ?? 0, [computedPricing]);
   const amountLabel = useMemo(() => {
     const value = amountTotal / 100;
@@ -431,12 +413,12 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
   useEffect(() => {
     setStockInfo(null);
     setStockLoading(false);
-  }, [user, selectedPaquete?.id, date]);
+  }, [user, selectedExperience?.id, date]);
 
   const salida = useMemo(() => {
-    if (!selectedPaquete || !date || date === 'sin-fecha') return null;
-    return (selectedPaquete.salidas ?? []).find((s) => s.fecha === date) ?? null;
-  }, [selectedPaquete, date]);
+    if (!selectedExperience || !date || date === 'sin-fecha') return null;
+    return (selectedExperience.salidas ?? []).find((s) => s.fecha === date) ?? null;
+  }, [selectedExperience, date]);
 
   const seatsEnabled = false;
 
@@ -458,12 +440,12 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
   }, [seatExtraOptions]);
 
   const fetchSeatMap = async () => {
-    if (!user || !selectedPaquete?.id || !date || date === 'sin-fecha' || !seatsEnabled) return;
+    if (!user || !selectedExperience?.id || !date || date === 'sin-fecha' || !seatsEnabled) return;
     setSeatLoading(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch(
-        `/api/admin/seats?packageId=${encodeURIComponent(selectedPaquete.id)}&date=${encodeURIComponent(date)}`,
+        `/api/admin/seats?experienceId=${encodeURIComponent(selectedExperience.id)}&date=${encodeURIComponent(date)}`,
         { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }
       );
       if (!res.ok) {
@@ -488,7 +470,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
     setSeatData(null);
     setSelectedSeatIds([]);
     if (seatsEnabled) void fetchSeatMap();
-  }, [seatsEnabled, selectedPaquete?.id, date, user]);
+  }, [seatsEnabled, selectedExperience?.id, date, user]);
 
   const seatLabelById = useMemo(() => {
     const map = new Map<string, string>();
@@ -576,8 +558,8 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedPaquete) {
-      toast.error('Seleccioná un paquete antes de continuar');
+    if (!selectedExperience) {
+      toast.error('Seleccioná una experiencia antes de continuar');
       return;
     }
     if (!user) {
@@ -628,7 +610,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          packageId: selectedPaquete.id,
+          experienceId: selectedExperience.id,
           date,
           peopleAdults: Math.max(0, Number(adults) || 0),
           peopleMinors: Math.max(0, Number(minors) || 0),
@@ -700,7 +682,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
           </p>
           <h1 className="mt-1.5 text-[22px] font-bold tracking-[-0.02em] text-gray-900">Crear reserva manual</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Cargá el paquete, el titular y los pasajeros. Los comentarios y los comprobantes son opcionales.
+            Cargá la experiencia, el titular y los pasajeros. Los comentarios y los comprobantes son opcionales.
           </p>
         </div>
         <Button asChild variant="outline" className="shrink-0 rounded-full text-sm font-medium">
@@ -719,18 +701,18 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label>Paquete</Label>
+                    <Label>Experiencia</Label>
                     <Select
-                      value={selectedPackageId}
-                      onValueChange={(value) => setSelectedPackageId(value)}
+                      value={selectedExperienceId}
+                      onValueChange={(value) => setSelectedExperienceId(value)}
                     >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccioná un paquete" />
+                      <SelectValue placeholder="Seleccioná una experiencia" />
                     </SelectTrigger>
                     <SelectContent>
-                      {paquetes.map((pkg) => (
-                        <SelectItem key={pkg.id} value={pkg.id}>
-                          {pkg.titulo}
+                      {experiencias.map((experience) => (
+                        <SelectItem key={experience.id} value={experience.id}>
+                          {experience.titulo ?? (experience as any).title}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -807,12 +789,12 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                   </div>
                   <p className="text-xs text-gray-500">
                     Máximo por reserva:{' '}
-                    {selectedPaquete?.bookingConfig?.maxPeoplePerBooking ?? selectedPaquete?.capacidadMaxima ?? 50}
+                    {selectedExperience?.bookingConfig?.maxPeoplePerBooking ?? selectedExperience?.capacidadMaxima ?? 50}
                   </p>
                 </div>
               </div>
 
-              {selectedPaquete?.reservationPricing?.mode === 'percent' ? (
+              {selectedExperience?.reservationPricing?.mode === 'percent' ? (
                 <div className="grid gap-3 rounded-2xl bg-gray-50 p-4 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label className="text-xs text-gray-600">Adultos (%)</Label>
@@ -839,15 +821,15 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                 </div>
               ) : null}
 
-              {packageAddonOptions.length > 0 ? (
+              {experienceAddonOptions.length > 0 ? (
                 <div className="rounded-2xl bg-gray-50 p-4">
-                  <Label className="text-xs text-gray-600">Adicionales del paquete</Label>
+                  <Label className="text-xs text-gray-600">Adicionales de la experiencia</Label>
                   <p className="mt-0.5 text-xs text-gray-500">
                     Se cobran una sola vez por reserva, no por persona.
                   </p>
                   <div className="mt-3 space-y-2">
-                    {packageAddonOptions.map((addon) => {
-                      const key = `pkg:${selectedPackageId}:${addon.id}`;
+                    {experienceAddonOptions.map((addon) => {
+                      const key = `experience:${selectedExperienceId}:${addon.id}`;
                       const checked = manualExtras.some((item) => item.key === key);
                       return (
                         <label
@@ -896,9 +878,9 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
               <div className="rounded-2xl bg-gray-50 p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <Label className="text-xs text-gray-600">Adicionales de otras excursiones</Label>
+                    <Label className="text-xs text-gray-600">Adicionales de otras experiencias</Label>
                     <p className="mt-0.5 text-xs text-gray-500">
-                      Traé un adicional creado para otra excursión sin salir de acá.
+                      Traé un adicional creado para otra experiencia sin salir de acá.
                     </p>
                   </div>
                   <Button
@@ -922,7 +904,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                         >
                           <span className="min-w-0">
                             <span className="block truncate text-sm font-medium text-gray-900">{item.title}</span>
-                            <span className="block truncate text-xs text-gray-500">{item.packageTitle}</span>
+                            <span className="block truncate text-xs text-gray-500">{item.experienceTitle}</span>
                           </span>
                           <span className="flex shrink-0 items-center gap-2">
                             <span className="text-sm font-semibold tabular-nums text-gray-900">
@@ -948,7 +930,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                     <Input
                       value={catalogQuery}
                       onChange={(event) => setCatalogQuery(event.target.value)}
-                      placeholder="Buscar por adicional o excursión…"
+                      placeholder="Buscar por adicional o experiencia…"
                       disabled={submitting}
                     />
                     <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto pr-0.5">
@@ -956,11 +938,11 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                         <p className="rounded-xl bg-white px-3 py-2.5 text-xs text-gray-500">
                           {loadingCatalog
                             ? 'Cargando catálogo…'
-                            : 'Sin resultados. Ninguna otra excursión tiene adicionales que coincidan.'}
+                            : 'Sin resultados. Ninguna otra experiencia tiene adicionales que coincidan.'}
                         </p>
                       ) : (
                         filteredCatalog.slice(0, 30).map((entry) => {
-                          const key = `catalog:${entry.packageId}:${entry.addon.id}`;
+                          const key = `catalog:${entry.experienceId}:${entry.addon.id}`;
                           const added = manualExtras.some((item) => item.key === key);
                           return (
                             <div
@@ -969,7 +951,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                             >
                               <span className="min-w-0">
                                 <span className="block truncate text-sm font-medium text-gray-900">{entry.addon.title}</span>
-                                <span className="block truncate text-xs text-gray-500">{entry.packageTitle}</span>
+                                <span className="block truncate text-xs text-gray-500">{entry.experienceTitle}</span>
                               </span>
                               <span className="flex shrink-0 items-center gap-2">
                                 <span className="text-sm font-semibold tabular-nums text-gray-900">
@@ -990,7 +972,7 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                                               key,
                                               title: entry.addon.title,
                                               price: entry.addon.price,
-                                              packageTitle: entry.packageTitle,
+                                              experienceTitle: entry.experienceTitle,
                                             },
                                           ]
                                     )
@@ -1128,26 +1110,14 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div className="space-y-1">
-                  <Select
-                    value={vendorId || 'none'}
-                    onValueChange={(value) => {
-                      setVendorId(value === 'none' ? '' : value);
+                  <VendorCombobox
+                    value={vendorId}
+                    onChange={(id) => {
+                      setVendorId(id);
                       setSelectedReferralCode('');
                       setManualReferralCode('');
                     }}
-                  >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccioná un vendedor" />
-                        </SelectTrigger>
-                        <SelectContent>
-                      <SelectItem value="none">Sin vendedor</SelectItem>
-                          {vendors.map((v) => (
-                            <SelectItem key={v.id} value={v.id}>
-                              {v.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                  />
                     </div>
                     <div className="space-y-1">
                       <Select
@@ -1156,19 +1126,19 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
                           setSelectedReferralCode(value === 'none' ? '' : value);
                           setManualReferralCode('');
                         }}
-                        disabled={!vendorId || referralLinksForPackage.length === 0}
+                        disabled={!vendorId || referralLinksForExperience.length === 0}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="Elegí un código del vendedor" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Sin código</SelectItem>
-                          {referralLinksForPackage.length === 0 ? (
+                          {referralLinksForExperience.length === 0 ? (
                       <SelectItem value="__no_codes__" disabled>
                             Sin códigos disponibles
                           </SelectItem>
                           ) : (
-                            referralLinksForPackage.map((l) => (
+                            referralLinksForExperience.map((l) => (
                               <SelectItem key={l.id} value={l.code}>
                                 {l.code} {l.experienceName ? `· ${l.experienceName}` : ''}
                               </SelectItem>
@@ -1377,9 +1347,9 @@ export default function AdminReservaForm({ paquetes, hideReferral, hideVendorSel
           <CardContent className="space-y-5">
             <div className="divide-y divide-gray-100 rounded-2xl border border-gray-100">
               <div className="px-4 py-2.5">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Paquete</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Experiencia</p>
                 <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">
-                  {selectedPaquete?.titulo ?? '—'}
+                  {selectedExperience?.titulo ?? (selectedExperience as any)?.title ?? '—'}
                 </p>
               </div>
               <div className="px-4 py-2.5">

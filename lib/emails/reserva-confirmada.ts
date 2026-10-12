@@ -96,7 +96,7 @@ export function buildClienteCompraConfirmadaHtml(data: ReservaEmailData): string
       <div style="background:#f8fafc; border-radius: 12px; padding: 18px; margin-bottom: 18px; border: 1px solid #e2e8f0;">
         <table style="width:100%; border-collapse: collapse;">
           <tr>
-            <td style="padding: 10px 0; font-size: 0.875rem; color: #64748b; border-bottom: 1px solid #e2e8f0;">Paquete</td>
+            <td style="padding: 10px 0; font-size: 0.875rem; color: #64748b; border-bottom: 1px solid #e2e8f0;">Experiencia</td>
             <td style="padding: 10px 0; font-size: 0.9375rem; font-weight: 700; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${title}</td>
           </tr>
           <tr>
@@ -173,7 +173,7 @@ export function buildClienteCompraConfirmadaText(data: ReservaEmailData): string
     '',
     'Recibimos tu pago. Guardá este código de reserva.',
     '',
-    `Paquete: ${experienceTitle}`,
+    `Experiencia: ${experienceTitle}`,
     `Fecha: ${dateFormatted}`,
     `Pasajeros: ${peopleLabel}`,
     ...(seatsLabel ? [`Butacas: ${seatsLabel}`] : []),
@@ -253,7 +253,7 @@ export function buildClienteVoucher48hsHtml(data: ReservaEmailData): string {
       <div style="background:#f8fafc; border-radius: 12px; padding: 18px; margin-bottom: 18px; border: 1px solid #e2e8f0;">
         <table style="width:100%; border-collapse: collapse;">
           <tr>
-            <td style="padding: 10px 0; font-size: 0.875rem; color: #64748b; border-bottom: 1px solid #e2e8f0;">Paquete</td>
+            <td style="padding: 10px 0; font-size: 0.875rem; color: #64748b; border-bottom: 1px solid #e2e8f0;">Experiencia</td>
             <td style="padding: 10px 0; font-size: 0.9375rem; font-weight: 800; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${experienceTitle}</td>
           </tr>
           <tr>
@@ -327,7 +327,7 @@ export function buildClienteVoucher48hsText(data: ReservaEmailData): string {
     '',
     saludo,
     '',
-    `Paquete: ${experienceTitle}`,
+    `Experiencia: ${experienceTitle}`,
     `Fecha: ${dateFormatted}`,
     `Horario: ${hora}`,
     `Punto de salida: ${punto}`,
@@ -387,7 +387,7 @@ export function buildClienteReservaConfirmadaHtml(data: ReservaEmailData): strin
         
         <table style="width:100%; border-collapse: collapse;">
           <tr>
-            <td style="padding: 10px 0; font-size: 0.875rem; color: #64748b; border-bottom: 1px solid #e2e8f0;">Paquete / Experiencia</td>
+            <td style="padding: 10px 0; font-size: 0.875rem; color: #64748b; border-bottom: 1px solid #e2e8f0;">Experiencia</td>
             <td style="padding: 10px 0; font-size: 0.9375rem; font-weight: 600; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${experienceTitle}</td>
           </tr>
           <tr>
@@ -476,7 +476,7 @@ export function buildClienteReservaConfirmadaText(data: ReservaEmailData): strin
     'Tu reserva ha sido confirmada exitosamente.',
     '',
     'DETALLE DE TU RESERVA:',
-    `Paquete: ${experienceTitle}`,
+    `Experiencia: ${experienceTitle}`,
     `Fecha: ${dateFormatted}`,
     `Pasajeros: ${peopleLabel}`,
     ...(seatsLabel ? [`Butacas: ${seatsLabel}`] : []),

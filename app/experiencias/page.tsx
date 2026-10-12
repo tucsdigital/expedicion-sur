@@ -1,12 +1,13 @@
 import { collection, getDocs, orderBy as firestoreOrderBy, query, where } from 'firebase/firestore';
 import { db, firebaseEnabled } from '@/lib/firebase';
-import { Categoria, Paquete } from '@/types';
+import { Categoria } from '@/types';
 import Navbar from '@/components/Navbar';
 import HomeFooter from '@/components/home/HomeFooter';
 import WhatsAppButton from '@/components/WhatsAppButton';
 import PaquetesClient from '@/components/PaquetesClient';
 import type { Metadata } from 'next';
 import { serializeFirestoreData } from '@/lib/utils/serialize';
+import { getExperiencias } from '@/lib/experiencias-catalog';
 import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '@/lib/constants';
 import { buildPageTitle, siteConfig } from '@/lib/siteConfig';
 import { syncPackageCategoryData } from '@/lib/packages/category-utils';
@@ -39,26 +40,6 @@ export const metadata: Metadata = {
 export const revalidate = 0;
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-async function getPaquetes(): Promise<Paquete[]> {
-  if (!firebaseEnabled) return [];
-  try {
-    const snapshot = await getDocs(
-      query(
-        collection(db, 'paquetes'),
-        where('visible', '==', true),
-        firestoreOrderBy('orden', 'asc')
-      )
-    );
-
-    return snapshot.docs.map((doc) => serializeFirestoreData<Paquete>({ id: doc.id, ...doc.data() }));
-  } catch (error) {
-    const snapshot = await getDocs(query(collection(db, 'paquetes'), where('visible', '==', true)));
-    return snapshot.docs
-      .map((doc) => serializeFirestoreData<Paquete>({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
-  }
-}
 
 async function getCategorias(): Promise<Categoria[]> {
   if (!firebaseEnabled) return [];
@@ -103,8 +84,8 @@ export default async function ExperienciasPage({
   searchParams?: SearchParams;
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
-  const [paquetes, categorias] = await Promise.all([getPaquetes(), getCategorias()]);
-  const normalizedPaquetes = paquetes.map((paquete) => syncPackageCategoryData(paquete, categorias));
+  const [experiencias, categorias] = await Promise.all([getExperiencias(), getCategorias()]);
+  const normalizedExperiencias = experiencias.map((experience) => syncPackageCategoryData(experience, categorias));
 
   const tipos = normalizeParam(resolvedSearchParams.tipo);
   const tag = normalizeParam(resolvedSearchParams.tag);
@@ -180,7 +161,7 @@ export default async function ExperienciasPage({
         </div>
       </section>
 
-      <PaquetesClient paquetes={normalizedPaquetes} categorias={categorias} />
+      <PaquetesClient paquetes={normalizedExperiencias} categorias={categorias} />
 
       <HomeFooter />
     </>

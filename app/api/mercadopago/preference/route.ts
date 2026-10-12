@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPreference, getCheckoutUrl, mercadopagoEnabled } from '@/lib/mercadopago';
-import { getPaqueteBySlug, getPaqueteById } from '@/lib/paquetes';
+import { getExperienciaBySlug, getExperienciaById } from '@/lib/experiencias-catalog';
 import { collection, doc, getDoc, getDocs, orderBy, query, runTransaction, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { addMinutes, computeBaseCapacity, getAvailableForPackageDate, getHeldPeople, getHoldMinutes, getStockDelta, toMillis } from '@/lib/cart/server';
+import { addMinutes, computeExperienceBaseCapacity, getAvailableForExperienceDate, getExperienceHeldPeople, getHoldMinutes, getExperienceStockDelta, toMillis } from '@/lib/cart/server';
 import { orderExternalReference } from '@/lib/orders';
 import { getSeatDepartureId, seatIdsFromLabels } from '@/lib/seats/server';
 import type { SeatLayoutTemplate } from '@/types';
-import { computeReservationPricing, getPackageAddonExtraSelections, resolveDepartureConfig } from '@/lib/packages/resolve-departure';
+import { computeExperiencePricing, getExperienceAddonExtraSelections, resolveExperienceDepartureConfig } from '@/lib/experience-booking';
 import { getPeopleBreakdownTotal, normalizePeopleBreakdown, normalizePeopleCategories } from '@/lib/packages/people-categories';
 import { formatIsoDateEs, getFirstBookableDateIso, getMinLeadHours, isDateBookable } from '@/lib/packages/booking-rules';
 import { getCountryByName } from '@/lib/countries';
@@ -28,6 +28,8 @@ const travelerDetailsSchema = z.object({
 const payloadSchema = z.object({
   cartId: z.string().min(1).optional(),
   slug: z.string().min(1).optional(),
+  experienceId: z.string().min(1).optional(),
+  /** Compatibilidad con links y checkouts ya abiertos antes del despliegue. */
   packageId: z.string().min(1).optional(),
   date: z.string().optional(),
   people: z.number().int().min(1).max(50).optional(),
@@ -49,7 +51,7 @@ const payloadSchema = z.object({
   referralCode: z.string().max(60).optional(),
 }).refine((data) => {
   if (data.cartId) return true;
-  return Boolean(data.people && (data.slug || data.packageId));
+  return Boolean(data.people && (data.slug || data.experienceId || data.packageId));
 }, { message: 'Faltan datos.' });
 
 const getSiteUrl = () => process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
@@ -143,7 +145,7 @@ function buildPreferenceExtraItems(params: {
       return {
         id: `${params.item.cartItemId || `item-${params.index}`}-extra-${extraIndex}`,
         title: label,
-        description: String(params.item?.packageTitle ?? 'Extra de reserva'),
+                 description: String(params.item?.experienceTitle ?? params.item?.packageTitle ?? 'Extra de reserva'),
         quantity,
         unit_price: amount / 100,
         currency_id: params.currency,
@@ -217,11 +219,11 @@ function withQueryParams(url: string, params: Record<string, string | number | n
 
 /**
  * Regla de anticipación mínima (ej: 48 hs): devuelve el mensaje de error
- * cuando la fecha elegida no cumple el plazo configurado para el paquete.
+  * cuando la fecha elegida no cumple el plazo configurado para la experiencia.
  */
-function leadTimeError(paquete: { bookingConfig?: { minLeadHours?: number } | null }, date: string): string | null {
+function leadTimeError(experience: { bookingConfig?: { minLeadHours?: number } | null }, date: string): string | null {
   if (!date || date === 'sin-fecha') return null;
-  const minLeadHours = getMinLeadHours(paquete.bookingConfig);
+  const minLeadHours = getMinLeadHours(experience.bookingConfig);
   if (isDateBookable(date, minLeadHours)) return null;
   const firstBookableDate = formatIsoDateEs(getFirstBookableDateIso(minLeadHours));
   return `Las reservas se realizan con un mínimo de ${minLeadHours} hs de anticipación. Elegí una fecha a partir del ${firstBookableDate}.`;
@@ -246,7 +248,8 @@ export async function POST(request: Request) {
   const {
     cartId,
     slug,
-    packageId,
+    experienceId: requestedExperienceId,
+    packageId: legacyPackageId,
     date: dateParam,
     people: peopleMaybe,
     customerEmail,
@@ -262,6 +265,7 @@ export async function POST(request: Request) {
     failureUrl: bodyFailureUrl,
     pendingUrl: bodyPendingUrl,
   } = parsed.data;
+  const experienceId = requestedExperienceId ?? legacyPackageId;
   const referralCode = parsed.data.referralCode?.trim() || undefined;
   if (!cartId && !getCountryByName(customerCountry ?? '')) {
     return NextResponse.json({ error: 'Seleccion� un pa�s v�lido.' }, { status: 400 });
@@ -400,16 +404,16 @@ export async function POST(request: Request) {
       }
       const itemExpiresMs = toMillis(it.expiresAt);
       if (itemExpiresMs > 0 && itemExpiresMs < minExpiresMs) minExpiresMs = itemExpiresMs;
-      const pkg = await getPaqueteById(String(it.packageId));
-      if (!pkg) {
-        return NextResponse.json({ error: 'Hay paquetes que ya no están disponibles. Volvé al carrito para actualizar.' }, { status: 400 });
+      const experience = await getExperienciaById(String((it as any).experienceId ?? it.packageId));
+      if (!experience) {
+        return NextResponse.json({ error: 'Hay experiencias que ya no están disponibles. Volvé al carrito para actualizar.' }, { status: 400 });
       }
-      if (pkg.bookingConfig?.enabled === false) {
-        return NextResponse.json({ error: 'Hay paquetes con reservas deshabilitadas en el carrito. Volvé al carrito para actualizar.' }, { status: 400 });
+      if (experience.bookingConfig?.enabled === false) {
+        return NextResponse.json({ error: 'Hay experiencias con reservas deshabilitadas en el carrito. Volvé al carrito para actualizar.' }, { status: 400 });
       }
       const date = String(it.date || 'sin-fecha');
       const isNoDate = date === 'sin-fecha';
-      const departureConfig = resolveDepartureConfig(pkg, date);
+      const departureConfig = resolveExperienceDepartureConfig(experience, date);
       if (!isNoDate) {
         if (!departureConfig.exists) {
           return NextResponse.json({ error: 'Hay salidas que ya no existen en el carrito. Volvé al carrito para actualizar.' }, { status: 400 });
@@ -417,7 +421,7 @@ export async function POST(request: Request) {
         if (!departureConfig.enabled) {
           return NextResponse.json({ error: 'Hay fechas no habilitadas en el carrito. Volvé al carrito para actualizar.' }, { status: 400 });
         }
-        const leadError = leadTimeError(pkg, date);
+        const leadError = leadTimeError(experience, date);
         if (leadError) {
           return NextResponse.json({ error: leadError }, { status: 400 });
         }
@@ -457,7 +461,7 @@ export async function POST(request: Request) {
       const depositPercentAdults = typeof (it as any).depositPercentAdults === 'number' ? Number((it as any).depositPercentAdults) : null;
       const depositPercentMinors = typeof (it as any).depositPercentMinors === 'number' ? Number((it as any).depositPercentMinors) : null;
 
-      const computedPricing = computeReservationPricing(pkg, date, {
+      const computedPricing = computeExperiencePricing(experience, date, {
         people,
         peopleAdults,
         peopleMinors,
@@ -466,11 +470,11 @@ export async function POST(request: Request) {
         selectedExtras: Array.isArray((it as any).selectedExtras) ? (it as any).selectedExtras : null,
       });
       if (computedPricing.pricingMode === 'percent' && computedPricing.baseUnitAmount < 1) {
-        return NextResponse.json({ error: `Falta precio base para calcular porcentaje (${pkg.titulo}).` }, { status: 400 });
+        return NextResponse.json({ error: `Falta precio base para calcular porcentaje (${experience.titulo ?? (experience as any).title ?? 'Experiencia'}).` }, { status: 400 });
       }
       const unitAmount = computedPricing.unitAmount;
       if (unitAmount < 1 || computedPricing.subtotalAmount < 1) {
-        return NextResponse.json({ error: `Precio no configurado para ${pkg.titulo}.` }, { status: 400 });
+        return NextResponse.json({ error: `Precio no configurado para ${experience.titulo ?? (experience as any).title ?? 'Experiencia'}.` }, { status: 400 });
       }
 
       {
@@ -478,7 +482,7 @@ export async function POST(request: Request) {
         if (seatsEnabled) {
           const seatLayoutId = departureConfig.seatLayoutId ?? '';
           if (!seatLayoutId) {
-            return NextResponse.json({ error: 'Este paquete requiere butacas, pero no tiene plantilla asignada.' }, { status: 400 });
+            return NextResponse.json({ error: 'Esta experiencia requiere butacas, pero no tiene una plantilla asignada.' }, { status: 400 });
           }
           const seatLabels = Array.isArray(it.selectedSeats) && it.selectedSeats.length
             ? it.selectedSeats.map((s: any) => String(s))
@@ -499,7 +503,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Una o más butacas ya no existen. Volvé al carrito para actualizar.' }, { status: 400 });
           }
 
-          const seatResSnap = await getDoc(doc(db, 'seatReservations', getSeatDepartureId(pkg.id, date)));
+          const seatResSnap = await getDoc(doc(db, 'seatReservations', getSeatDepartureId(experience.id, date)));
           if (!seatResSnap.exists()) {
             return NextResponse.json({ error: 'No se pudo validar butacas. Volvé al carrito para actualizar.' }, { status: 400 });
           }
@@ -525,10 +529,10 @@ export async function POST(request: Request) {
       }
 
       if (!isNoDate) {
-        const baseCapacity = computeBaseCapacity(pkg, date);
+        const baseCapacity = computeExperienceBaseCapacity(experience, date);
         if (baseCapacity > 0) {
-          const delta = await getStockDelta(pkg.id, date);
-          const held = await getHeldPeople(pkg.id, date);
+          const delta = await getExperienceStockDelta(experience.id, date);
+          const held = await getExperienceHeldPeople(experience.id, date);
           if (baseCapacity + delta - held < 0) {
             return NextResponse.json({ error: 'El cupo cambió y el carrito quedó inválido. Volvé al carrito para actualizar.' }, { status: 400 });
           }
@@ -540,9 +544,9 @@ export async function POST(request: Request) {
       itemsSnapshot.push({
         cartItemId: it.id,
         holdId,
-        packageId: pkg.id,
-        packageSlug: pkg.slug,
-        packageTitle: pkg.titulo,
+        experienceId: experience.id,
+        experienceSlug: experience.slug,
+        experienceTitle: String(experience.titulo ?? (experience as any).title ?? ''),
         date: it.date,
         people,
         peopleAdults: computedPricing.peopleAdults,
@@ -560,7 +564,7 @@ export async function POST(request: Request) {
         subtotalAmount,
         currency: itemCurrency,
         referralCode: it.referralCode ?? null,
-        image: pkg.imagenTarjeta ?? pkg.imagenPrincipal ?? null,
+        image: experience.imagenTarjeta ?? experience.imagenPrincipal ?? (experience as any).cardImage ?? null,
         seatLayoutId:
           (typeof (it as any).seatLayoutId === 'string' ? String((it as any).seatLayoutId).trim() : '') ||
           (typeof hold.seatLayoutId === 'string' ? String(hold.seatLayoutId).trim() : '') ||
@@ -692,7 +696,7 @@ export async function POST(request: Request) {
             {
               ...base,
               id: it.cartItemId || `item-${index}`,
-              title: it.packageTitle,
+              title: (it as any).experienceTitle ?? (it as any).packageTitle ?? 'Experiencia',
               description: it.date && it.date !== 'sin-fecha'
                 ? `Salida ${it.date} · ${it.people} persona${it.people > 1 ? 's' : ''}`
                 : `Reserva para ${it.people} persona${it.people > 1 ? 's' : ''}`,
@@ -708,7 +712,7 @@ export async function POST(request: Request) {
           parts.push({
             ...base,
             id: `${it.cartItemId || `item-${index}`}-adult`,
-            title: `${it.packageTitle} (Adultos)`,
+            title: `${(it as any).experienceTitle ?? (it as any).packageTitle ?? 'Experiencia'} (Adultos)`,
             description: it.date && it.date !== 'sin-fecha'
               ? `Salida ${it.date} · Adultos (${adults})`
               : `Adultos (${adults})`,
@@ -720,7 +724,7 @@ export async function POST(request: Request) {
           parts.push({
             ...base,
             id: `${it.cartItemId || `item-${index}`}-minor`,
-            title: `${it.packageTitle} (Menores)`,
+            title: `${(it as any).experienceTitle ?? (it as any).packageTitle ?? 'Experiencia'} (Menores)`,
             description: it.date && it.date !== 'sin-fecha'
               ? `Salida ${it.date} · Menores (${minors})`
               : `Menores (${minors})`,
@@ -802,19 +806,19 @@ export async function POST(request: Request) {
     }
   }
 
-  let paquete = null;
+  let experience: Awaited<ReturnType<typeof getExperienciaById>> = null;
   if (slug) {
-    paquete = await getPaqueteBySlug(slug);
-  } else if (packageId) {
-    paquete = await getPaqueteById(packageId);
+    experience = await getExperienciaBySlug(slug);
+  } else if (experienceId) {
+    experience = await getExperienciaById(experienceId);
   }
 
-  if (!paquete) {
-    return NextResponse.json({ error: 'Paquete no encontrado.' }, { status: 404 });
+  if (!experience) {
+    return NextResponse.json({ error: 'Experiencia no encontrada.' }, { status: 404 });
   }
 
-  const bc = paquete.bookingConfig;
-  const departureConfig = resolveDepartureConfig(paquete, date);
+  const bc = experience.bookingConfig;
+  const departureConfig = resolveExperienceDepartureConfig(experience, date);
   const maxPeople = departureConfig.maxPeople;
   const maxPerBooking = Math.max(
     1,
@@ -850,7 +854,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Cantidad de personas inválida.' }, { status: 400 });
   }
   if (date === 'sin-fecha' && departureConfig.exists) {
-    return NextResponse.json({ error: 'Debés seleccionar una fecha para esta excursión.' }, { status: 400 });
+    return NextResponse.json({ error: 'Debés seleccionar una fecha para esta experiencia.' }, { status: 400 });
   }
   if (people > 1 && (passengerDetails?.length ?? 0) !== people - 1) {
     return NextResponse.json({ error: 'Faltan los datos de los demás pasajeros.' }, { status: 400 });
@@ -867,11 +871,11 @@ export async function POST(request: Request) {
     if (!departureConfig.enabled) {
       return NextResponse.json({ error: 'La fecha seleccionada no está habilitada.' }, { status: 400 });
     }
-    const leadError = leadTimeError(paquete, date);
+    const leadError = leadTimeError(experience, date);
     if (leadError) {
       return NextResponse.json({ error: leadError }, { status: 400 });
     }
-    const available = await getAvailableForPackageDate(paquete, date);
+    const available = await getAvailableForExperienceDate(experience, date);
     if (people > available) {
       return NextResponse.json(
         { error: 'No hay cupo suficiente para esa fecha. Actualizá la página y elegí otra fecha o menos personas.' },
@@ -888,15 +892,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const directSelectedExtras = getPackageAddonExtraSelections(
-    paquete,
+  const directSelectedExtras = getExperienceAddonExtraSelections(
+    experience,
     (parsed.data as any).addonIds
   );
   const peopleAdults =
     breakdown && typeof (breakdown as any).adults === 'number' ? Math.max(0, Math.floor((breakdown as any).adults)) : null;
   const peopleMinors =
     breakdown && typeof (breakdown as any).minors === 'number' ? Math.max(0, Math.floor((breakdown as any).minors)) : null;
-  const computedPricing = computeReservationPricing(paquete, date, {
+  const computedPricing = computeExperiencePricing(experience, date, {
     people,
     peopleAdults,
     peopleMinors,
@@ -909,7 +913,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Falta precio base para calcular porcentaje.' }, { status: 400 });
   }
   if (unitPrice < 1 || computedPricing.subtotalAmount < 1) {
-    return NextResponse.json({ error: 'Precio de reserva no configurado para este paquete.' }, { status: 400 });
+    return NextResponse.json({ error: 'Precio de reserva no configurado para esta experiencia.' }, { status: 400 });
   }
 
   const baseUrl = getRequestBaseUrl(request);
@@ -925,7 +929,7 @@ export async function POST(request: Request) {
   const successUrl = withQueryParams(
     safeReturnUrl(bodySuccessUrl, `${baseUrl}/checkout/success`, baseUrl),
     {
-      slug: paquete.slug,
+      slug: experience.slug,
       date,
       people,
       intentId,
@@ -934,7 +938,7 @@ export async function POST(request: Request) {
   const failureUrl = withQueryParams(
     safeReturnUrl(bodyFailureUrl, `${baseUrl}/checkout/cancel`, baseUrl),
     {
-      slug: paquete.slug,
+      slug: experience.slug,
       date,
       people,
       intentId,
@@ -943,7 +947,7 @@ export async function POST(request: Request) {
   const pendingUrl = withQueryParams(
     safeReturnUrl(bodyPendingUrl, successUrl, baseUrl),
     {
-      slug: paquete.slug,
+      slug: experience.slug,
       date,
       people,
       intentId,
@@ -952,7 +956,7 @@ export async function POST(request: Request) {
 
   // Registrar intento de checkout + hold de cupo (si aplica)
   const now = Timestamp.now();
-  const externalReference = `pkg-${paquete.id}-${Date.now()}`;
+  const externalReference = `experience-${experience.id}-${Date.now()}`;
   let holdId: string | null = null;
   let holdExpiresAt: Timestamp | null = null;
 
@@ -960,9 +964,9 @@ export async function POST(request: Request) {
     const holdRef = doc(collection(db, 'reservationHolds'));
     holdId = holdRef.id;
     holdExpiresAt = addMinutes(now, getHoldMinutes());
-    const lockRef = doc(db, 'stockHolds', `${paquete.id}_${date}`);
-    const baseCapacity = computeBaseCapacity(paquete, date);
-    const delta = await getStockDelta(paquete.id, date);
+    const lockRef = doc(db, 'stockHolds', `${experience.id}_${date}`);
+    const baseCapacity = computeExperienceBaseCapacity(experience, date);
+    const delta = await getExperienceStockDelta(experience.id, date);
 
     const ok = await runTransaction(db, async (tx) => {
       const lockSnap = await tx.get(lockRef);
@@ -975,8 +979,8 @@ export async function POST(request: Request) {
         {
           status: 'active',
           source: 'direct_checkout',
-          packageId: paquete.id,
-          packageSlug: paquete.slug,
+           experienceId: experience.id,
+           experienceSlug: experience.slug,
           date,
           people,
           peopleAdults,
@@ -992,7 +996,7 @@ export async function POST(request: Request) {
       );
 
       if (!lockSnap.exists()) {
-        tx.set(lockRef, { packageId: paquete.id, date, heldPeople: people, createdAt: now, updatedAt: now });
+        tx.set(lockRef, { experienceId: experience.id, date, heldPeople: people, createdAt: now, updatedAt: now });
       } else {
         tx.update(lockRef, { heldPeople: heldPeople + people, updatedAt: now });
       }
@@ -1011,9 +1015,9 @@ export async function POST(request: Request) {
   await setDoc(intentRef, {
     status: 'created',
     provider: 'mercadopago',
-    packageId: paquete.id,
-    packageSlug: paquete.slug,
-    packageTitle: paquete.titulo,
+    experienceId: experience.id,
+    experienceSlug: experience.slug,
+    experienceTitle: String(experience.titulo ?? (experience as any).title ?? ''),
     date,
     people,
     peopleAdults,
@@ -1060,13 +1064,13 @@ export async function POST(request: Request) {
 
   try {
     // Crear preferencia de pago en Mercado Pago
-    const productImage = paquete.imagenTarjeta ?? paquete.imagenPrincipal;
+    const productImage = experience.imagenTarjeta ?? experience.imagenPrincipal ?? (experience as any).cardImage;
     
     const preferenceResult = await createPreference({
       items: [
         {
-          title: paquete.titulo,
-          description: paquete.descripcionCorta ?? `Reserva para ${people} persona${people > 1 ? 's' : ''}`,
+          title: String(experience.titulo ?? (experience as any).title ?? 'Experiencia'),
+          description: experience.descripcionCorta ?? `Reserva para ${people} persona${people > 1 ? 's' : ''}`,
           quantity: people,
           unit_price: unitPrice / 100,
           currency_id: currency,
@@ -1076,7 +1080,7 @@ export async function POST(request: Request) {
           item: {
             selectedExtras: directSelectedExtras,
             people,
-            packageTitle: paquete.titulo,
+            experienceTitle: String(experience.titulo ?? (experience as any).title ?? 'Experiencia'),
           },
           currency,
           index: 0,

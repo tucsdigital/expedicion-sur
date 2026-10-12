@@ -62,7 +62,7 @@ export default function ProductsSection({
   if (!showSkeletons && !hasProductos) return null;
 
   return (
-    <section id="paquetes" className="overflow-x-hidden bg-transparent py-5 md:py-10">
+    <section id="experiencias" className="overflow-x-hidden bg-transparent py-5 md:py-10">
       <div id="productos" className="container mx-auto px-4 md:px-6 lg:px-8">
         <motion.div
           className={`max-w-3xl ${filterType === 'paquete' ? 'pb-2 md:pb-4' : ''}`}

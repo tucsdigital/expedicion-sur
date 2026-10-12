@@ -1,6 +1,5 @@
 ﻿/**
- * Funciones para gestionar Paquetes Turísticos (reemplaza experiencias.ts)
- * Adaptado para Expedicion Sur - Sistema de reservas sobre Paquetes
+ * Catálogo de experiencias comerciales y funciones de reservas.
  */
 
 import {
@@ -24,7 +23,8 @@ import type { Categoria, Paquete, Salida } from '@/types';
 import { getOperationalSalidas, resolveDepartureConfig } from '@/lib/packages/resolve-departure';
 import { packageHasCategory, syncPackageCategoryData } from '@/lib/packages/category-utils';
 
-const COLLECTION = 'paquetes';
+const COLLECTION = 'experiencias';
+const LEGACY_COLLECTION = 'paquetes';
 const CATEGORIAS_COLLECTION = 'categorias';
 
 async function fetchActiveCategoriasInternal(): Promise<Categoria[]> {
@@ -45,7 +45,58 @@ async function fetchActiveCategoriasInternal(): Promise<Categoria[]> {
 }
 
 function normalizeFetchedPackage(paquete: Paquete, categorias: Categoria[]): Paquete {
-  return syncPackageCategoryData(paquete, categorias);
+  const raw = paquete as any;
+  const currency = String(raw.moneda ?? raw.bookingConfig?.currency ?? 'ARS').toUpperCase();
+  const dates = Array.isArray(raw.salidas)
+    ? raw.salidas
+    : Array.isArray(raw.bookingConfig?.dates)
+      ? raw.bookingConfig.dates.map((item: any) => ({
+          fecha: String(item.date ?? ''),
+          precio: item.price,
+          cupo: item.capacity,
+          seatLayoutId: item.seatLayoutId,
+          seatSelectionEnabled: item.seatSelectionEnabled,
+          enabled: item.enabled,
+        }))
+      : [];
+  const normalized = {
+    ...raw,
+    id: String(raw.id ?? ''),
+    titulo: String(raw.titulo ?? raw.title ?? raw.name ?? ''),
+    slug: String(raw.slug ?? ''),
+    descripcion: String(raw.descripcion ?? raw.description ?? raw.subtitle ?? ''),
+    descripcionCorta: String(raw.descripcionCorta ?? raw.shortDescription ?? raw.subtitle ?? ''),
+    precio: Number(raw.precio ?? raw.price ?? 0) || 0,
+    moneda: currency === 'BRL' ? 'ARS' : currency === 'USD' || currency === 'EUR' ? currency : 'ARS',
+    capacidadMaxima: Number(raw.capacidadMaxima ?? raw.maxPeople ?? raw.bookingConfig?.maxPeoplePerBooking ?? 50) || 50,
+    imagenPrincipal: String(raw.imagenPrincipal ?? raw.cardImage ?? raw.images?.[0] ?? ''),
+    imagenTarjeta: String(raw.imagenTarjeta ?? raw.cardImage ?? raw.images?.[0] ?? ''),
+    galeria: Array.isArray(raw.galeria) ? raw.galeria : Array.isArray(raw.images) ? raw.images : [],
+    visible: raw.visible !== false,
+    destacado: Boolean(raw.destacado ?? raw.featured),
+    fechaCreacion: raw.fechaCreacion ?? raw.createdAt ?? new Date(0),
+    orden: Number(raw.orden ?? 0) || 0,
+    tipo: String(raw.tipo ?? raw.type ?? 'experiencia'),
+    salidas: dates,
+    addons: Array.isArray(raw.addons) ? raw.addons : [],
+  } as Paquete;
+  return syncPackageCategoryData(normalized, categorias);
+}
+
+export const normalizeExperienciaCatalogo = normalizeFetchedPackage;
+
+async function loadCatalogDocuments(visibleOnly: boolean): Promise<Array<{ id: string; data: Record<string, any> }>> {
+  const [experiencesSnapshot, legacySnapshot] = await Promise.all([
+    getDocs(collection(db, COLLECTION)),
+    getDocs(collection(db, LEGACY_COLLECTION)).catch(() => null),
+  ]);
+  const byId = new Map<string, { id: string; data: Record<string, any> }>();
+  legacySnapshot?.docs.forEach((item) => byId.set(item.id, { id: item.id, data: item.data() as Record<string, any> }));
+  // The canonical experience document wins on duplicate IDs; legacy documents
+  // remain untouched in Firestore and are used only as a read fallback.
+  experiencesSnapshot.docs.forEach((item) => byId.set(item.id, { id: item.id, data: item.data() as Record<string, any> }));
+  const rows = Array.from(byId.values()).filter((item) => !visibleOnly || item.data.visible !== false);
+  return rows.sort((a, b) => (Number(a.data.orden ?? 0) - Number(b.data.orden ?? 0)) || String(a.data.titulo ?? a.data.title ?? '').localeCompare(String(b.data.titulo ?? b.data.title ?? ''), 'es'));
 }
 
 // ============================================================================
@@ -72,6 +123,8 @@ export type BookingPublicData = {
 };
 
 export type PackageWithBooking = Paquete;
+/** Modelo comercial del catálogo actual (con alias legacy para datos existentes). */
+export type ExperienciaCatalogo = Paquete;
 
 // ============================================================================
 // FUNCIONES CRUD BÁSICAS
@@ -79,59 +132,38 @@ export type PackageWithBooking = Paquete;
 
 /** Obtener todos los paquetes visibles (para el frontend) */
 export async function getPaquetes(): Promise<Paquete[]> {
-  const [snap, categorias] = await Promise.all([
-    getDocs(
-      query(
-        collection(db, COLLECTION),
-        where('visible', '==', true),
-        orderBy('orden', 'asc')
-      )
-    ),
-    fetchActiveCategoriasInternal(),
-  ]);
-  return snap.docs.map((d) => normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: d.id, ...d.data() }), categorias));
+  const [rows, categorias] = await Promise.all([loadCatalogDocuments(true), fetchActiveCategoriasInternal()]);
+  return rows.map((item) => normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: item.id, ...item.data }), categorias));
 }
+
+/** Nombre canónico para cargar experiencias visibles. */
+export const getExperiencias = getPaquetes;
 
 /** Obtener paquetes destacados (para homepage) */
 export async function getPaquetesDestacados(maxItems = 6): Promise<Paquete[]> {
-  const [snap, categorias] = await Promise.all([
-    getDocs(
-      query(
-        collection(db, COLLECTION),
-        where('visible', '==', true),
-        where('destacado', '==', true),
-        orderBy('orden', 'asc'),
-        firestoreLimit(maxItems)
-      )
-    ),
-    fetchActiveCategoriasInternal(),
-  ]);
-  return snap.docs.map((d) => normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: d.id, ...d.data() }), categorias));
+  const all = await getPaquetes();
+  return all.filter((experience) => experience.destacado).slice(0, maxItems);
 }
 
 /** Obtener paquete por ID */
 export async function getPaqueteById(id: string): Promise<Paquete | null> {
-  const ref = doc(db, COLLECTION, id);
-  const [snap, categorias] = await Promise.all([getDoc(ref), fetchActiveCategoriasInternal()]);
-  if (!snap.exists()) return null;
+  const experienceRef = doc(db, COLLECTION, id);
+  const legacyRef = doc(db, LEGACY_COLLECTION, id);
+  const [experienceSnap, legacySnap, categorias] = await Promise.all([
+    getDoc(experienceRef),
+    getDoc(legacyRef).catch(() => null),
+    fetchActiveCategoriasInternal(),
+  ]);
+  const snap = experienceSnap.exists() ? experienceSnap : legacySnap;
+  if (!snap?.exists()) return null;
   return normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: snap.id, ...snap.data() }), categorias);
 }
 
 /** Obtener paquete por slug (para páginas públicas) */
 export async function getPaqueteBySlug(slug: string): Promise<Paquete | null> {
-  const [snap, categorias] = await Promise.all([
-    getDocs(
-      query(
-        collection(db, COLLECTION),
-        where('slug', '==', slug),
-        where('visible', '==', true)
-      )
-    ),
-    fetchActiveCategoriasInternal(),
-  ]);
-  if (snap.empty) return null;
-  const packageDoc = snap.docs[0];
-  return normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: packageDoc.id, ...packageDoc.data() }), categorias);
+  const [rows, categorias] = await Promise.all([loadCatalogDocuments(true), fetchActiveCategoriasInternal()]);
+  const match = rows.find((item) => String(item.data.slug ?? '') === slug);
+  return match ? normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: match.id, ...match.data }), categorias) : null;
 }
 
 /** Obtener paquetes por categoría/destino */
@@ -238,12 +270,12 @@ export async function deletePaquete(id: string): Promise<void> {
 
 /** Obtener todos los paquetes para admin (incluye no visibles) */
 export async function getAllPaquetesAdmin(): Promise<Paquete[]> {
-  const [snap, categorias] = await Promise.all([
-    getDocs(query(collection(db, COLLECTION), orderBy('orden', 'asc'))),
-    fetchActiveCategoriasInternal(),
-  ]);
-  return snap.docs.map((d) => normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: d.id, ...d.data() }), categorias));
+  const [rows, categorias] = await Promise.all([loadCatalogDocuments(false), fetchActiveCategoriasInternal()]);
+  return rows.map((item) => normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: item.id, ...item.data }), categorias));
 }
+
+/** Nombre canónico para cargar todas las experiencias desde el panel admin. */
+export const getAllExperienciasAdmin = getAllPaquetesAdmin;
 
 // ============================================================================
 // CONFIGURACIÓN DE RESERVAS (BOOKING CONFIG)

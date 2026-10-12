@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 
 const querySchema = z.object({
   q: z.string().min(2).max(120),
+  experienceId: z.string().min(1).optional(),
   packageId: z.string().min(1).optional(),
   date: z.string().min(1).optional(),
   status: z.string().min(1).optional(),
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({
     q: url.searchParams.get('q') ?? '',
-    packageId: url.searchParams.get('packageId') ?? undefined,
+    experienceId: url.searchParams.get('experienceId') ?? url.searchParams.get('packageId') ?? undefined,
     date: url.searchParams.get('date') ?? undefined,
     status: url.searchParams.get('status') ?? undefined,
     paymentMethod: url.searchParams.get('paymentMethod') ?? undefined,
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
 
   const qText = parsed.data.q.trim();
   const qLower = qText.toLowerCase();
-  const packageId = parsed.data.packageId ? String(parsed.data.packageId) : '';
+  const experienceId = String(parsed.data.experienceId ?? parsed.data.packageId ?? '');
   const date = parsed.data.date ? String(parsed.data.date) : '';
   const statusFilter = parsed.data.status ? String(parsed.data.status) : '';
   const paymentMethodFilter = parsed.data.paymentMethod ? String(parsed.data.paymentMethod) : '';
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
   }
 
   const filtered = out
-    .filter((r) => (packageId ? String(r.packageId ?? r.experienceId ?? '') === packageId : true))
+    .filter((r) => (experienceId ? String(r.experienceId ?? r.packageId ?? '') === experienceId : true))
     .filter((r) => (date ? String(r.date ?? '') === date : true))
     .filter((r) => (statusFilter ? String(r.status ?? '') === statusFilter : true))
     .filter((r) => (paymentMethodFilter ? String(r.paymentMethod ?? '') === paymentMethodFilter : true))
@@ -122,7 +123,7 @@ export async function GET(request: Request) {
         commercialStatusLabel: ventaStatuses.commercialStatusLabel,
         operationalStatus: ventaStatuses.operationalStatus,
         operationalStatusLabel: ventaStatuses.operationalStatusLabel,
-        packageTitle: String(r.packageTitle ?? r.experienceTitle ?? ''),
+        experienceTitle: String(r.experienceTitle ?? r.packageTitle ?? ''),
         date: String(r.date ?? ''),
         people: Number(r.people ?? 0),
         paymentMethod: String(r.paymentMethod ?? ''),

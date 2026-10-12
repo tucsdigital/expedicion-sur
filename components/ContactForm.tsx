@@ -99,8 +99,7 @@ export default function ContactForm({ paqueteTitulo, paqueteId }: ContactFormPro
     try {
       await addDoc(collection(db, 'consultas'), {
         ...data,
-        ...(paqueteTitulo && { paquete: paqueteTitulo }),
-        ...(paqueteId && { paqueteId }),
+        ...((paqueteTitulo || paqueteId) ? { experiencia: paqueteTitulo, experienceSlug: paqueteId } : {}),
         fechaCreacion: Timestamp.now(),
         leida: false,
       });

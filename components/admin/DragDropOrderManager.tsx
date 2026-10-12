@@ -198,7 +198,7 @@ export default function DragDropOrderManager({
         const newItem: OrderItem = {
           id: 'nuevo-temp',
           nombre: collectionName === 'categorias' ? newItemName : undefined,
-          titulo: collectionName === 'paquetes' || collectionName === 'paquetes_f1' || collectionName === 'blog' ? newItemName : undefined,
+          titulo: collectionName === 'experiencias' || collectionName === 'paquetes' || collectionName === 'paquetes_f1' || collectionName === 'blog' ? newItemName : undefined,
           orden: data.length > 0 ? Math.max(...data.map(item => item.orden)) + 1 : 1,
         };
         data.push(newItem);
@@ -236,7 +236,7 @@ export default function DragDropOrderManager({
             updatedItems[newItemIndex] = {
               ...updatedItems[newItemIndex],
               nombre: collectionName === 'categorias' ? newItemName : updatedItems[newItemIndex].nombre,
-              titulo: collectionName === 'paquetes' || collectionName === 'paquetes_f1' || collectionName === 'blog' ? newItemName : updatedItems[newItemIndex].titulo,
+              titulo: collectionName === 'experiencias' || collectionName === 'paquetes' || collectionName === 'paquetes_f1' || collectionName === 'blog' ? newItemName : updatedItems[newItemIndex].titulo,
             };
             return updatedItems;
           }
@@ -458,4 +458,3 @@ export default function DragDropOrderManager({
     </Card>
   );
 }
-

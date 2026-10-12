@@ -587,7 +587,7 @@ export default function DocumentacionAdminPage() {
                       value="paquetes"
                       className="text-gray-600 hover:bg-black/5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:font-semibold data-[state=active]:shadow-[0_14px_35px_-28px_rgba(0,0,0,0.45)] data-[state=active]:ring-1 data-[state=active]:ring-primary/20"
                     >
-                      Paquetes
+                      Experiencias
                     </TabsTrigger>
                     <TabsTrigger
                       value="banners"
@@ -645,7 +645,7 @@ export default function DocumentacionAdminPage() {
                               value="paquetes"
                               className="text-gray-600 hover:bg-black/5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:font-semibold data-[state=active]:ring-1 data-[state=active]:ring-primary/20"
                             >
-                              Paquetes
+                              Experiencias
                             </TabsTrigger>
                             <TabsTrigger
                               value="categorias"

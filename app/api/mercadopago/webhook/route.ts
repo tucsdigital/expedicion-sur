@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPayment, isPaymentApproved, isPaymentRejected, mapPaymentStatusToReservationStatus } from '@/lib/mercadopago';
 import { getFromEmail, isResendConfigured, resend } from '@/lib/resend';
-import { getPaqueteById } from '@/lib/paquetes';
+import { getExperienciaById } from '@/lib/experiencias-catalog';
 import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
 import {
   buildClienteCompraConfirmadaHtml,
@@ -22,7 +22,7 @@ import {
 } from '@/lib/reservas/code';
 import { buildDefaultEmailDelivery, buildQueuedEmailDelivery } from '@/lib/sales/status';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
-import { resolveDepartureConfig } from '@/lib/packages/resolve-departure';
+import { resolveExperienceDepartureConfig } from '@/lib/experience-booking';
 import {
   Timestamp,
   collection,
@@ -190,11 +190,11 @@ function computeVoucherNextAttemptAt(params: {
 }
 
 function getBaseCapacityForDate(
-  paquete: Awaited<ReturnType<typeof getPaqueteById>> | null,
+  experience: Awaited<ReturnType<typeof getExperienciaById>> | null,
   date: string
 ): number {
-  if (!paquete) return 0;
-  return resolveDepartureConfig(paquete, date).baseCapacity;
+  if (!experience) return 0;
+  return resolveExperienceDepartureConfig(experience, date).baseCapacity;
 }
 
 /**
@@ -406,11 +406,11 @@ export async function POST(request: Request) {
       const cartRef = doc(db, 'carts', String(cartId));
       const orderRef = orderId ? doc(db, 'orders', orderId) : null;
 
-      const pkgs = new Map<string, Awaited<ReturnType<typeof getPaqueteById>> | null>();
+      const pkgs = new Map<string, Awaited<ReturnType<typeof getExperienciaById>> | null>();
       for (const it of cartItems) {
-        const pid = String(it.packageId || '');
+        const pid = String(it.experienceId || it.packageId || '');
         if (!pid || pkgs.has(pid)) continue;
-        pkgs.set(pid, await getPaqueteById(pid));
+        pkgs.set(pid, await getExperienciaById(pid));
       }
 
       // Reservar códigos secuenciales ANTES de la transacción: un código
@@ -469,8 +469,9 @@ export async function POST(request: Request) {
             ? `ord_${orderId}_${String(it.cartItemId || it.id || `idx_${idx}`)}`
             : `mp_${paymentId}_${String(it.cartItemId || it.id || `idx_${idx}`)}`;
           const code = reservedCodes[idx] ?? '';
-          const pkg = pkgs.get(String(it.packageId || '')) ?? null;
-          const finalTitle = String(it.packageTitle || it.experienceTitle || '') || pkg?.titulo || SITE_NAME;
+          const pid = String(it.experienceId || it.packageId || '');
+          const pkg = pkgs.get(pid) ?? null;
+          const finalTitle = String(it.experienceTitle || it.packageTitle || '') || pkg?.titulo || SITE_NAME;
           const itemDate = String(it.date || 'sin-fecha');
           const itemPeople = Number(it.people ?? 0) || 0;
           const itemCurrency = String(it.currency || intentData.currency || 'ars');
@@ -855,9 +856,6 @@ export async function POST(request: Request) {
                 ...(orderId ? { orderId } : {}),
                 cartId: String(cartId),
                 cartItemId,
-                packageId,
-                packageSlug,
-                packageTitle: finalPackageTitle,
                 experienceId: packageId,
                 experienceSlug: packageSlug,
                 experienceTitle: finalPackageTitle,
@@ -867,7 +865,7 @@ export async function POST(request: Request) {
                 peopleMinors: typeof (it as any).peopleMinors === 'number' ? Number((it as any).peopleMinors) : null,
                 seatLayoutId:
                   (typeof (it as any).seatLayoutId === 'string' ? String((it as any).seatLayoutId).trim() : '') ||
-                  (pkg ? resolveDepartureConfig(pkg, date).seatLayoutId : null),
+                  (pkg ? resolveExperienceDepartureConfig(pkg, date).seatLayoutId : null),
                 selectedSeats: Array.isArray((it as any).selectedSeats) ? (it as any).selectedSeats : null,
                 pricingMode: pricingMode === 'percent' || pricingMode === 'fixed' ? pricingMode : null,
                 pricingBaseUnitAmount: pricingBaseUnitAmount !== null ? pricingBaseUnitAmount : null,
@@ -932,11 +930,10 @@ export async function POST(request: Request) {
                 capacitySnapshot: {
                   date,
                   baseCapacity,
-                  maxPeoplePerBooking: pkg ? resolveDepartureConfig(pkg, date).maxPeople : null,
+                  maxPeoplePerBooking: pkg ? resolveExperienceDepartureConfig(pkg, date).maxPeople : null,
                   hasSpecificDates: Boolean(pkg?.salidas?.length),
-                  enabled: pkg ? resolveDepartureConfig(pkg, date).enabled : false,
+                  enabled: pkg ? resolveExperienceDepartureConfig(pkg, date).enabled : false,
                 },
-                packageSnapshot: { id: packageId, slug: packageSlug, title: finalPackageTitle },
                 experienceSnapshot: { id: packageId, slug: packageSlug, title: finalPackageTitle },
                 statusHistory: [
                   {
@@ -1026,7 +1023,7 @@ export async function POST(request: Request) {
                   to: CONTACT_INFO.email,
                   from,
                   replyTo,
-                  subject: `Nueva reserva: ${finalPackageTitle || 'Paquete'} — ${customerName || customerEmail}`,
+                  subject: `Nueva reserva: ${finalPackageTitle || 'Experiencia'} — ${customerName || customerEmail}`,
                   html: htmlAdmin,
                   text: textAdmin,
                   attempts: adminSendId ? 1 : 0,
@@ -1360,7 +1357,7 @@ export async function POST(request: Request) {
     } = intentData;
 
     // Obtener datos actualizados del paquete
-    const pkg = packageId ? await getPaqueteById(packageId) : null;
+    const pkg = packageId ? await getExperienciaById(packageId) : null;
     const finalPackageTitle = packageTitle ?? pkg?.titulo ?? '';
     const baseCapacity = getBaseCapacityForDate(pkg, date);
 
@@ -1523,10 +1520,6 @@ export async function POST(request: Request) {
           }
 
           tx.set(reservaRef, {
-            packageId,
-            packageSlug,
-            packageTitle: finalPackageTitle,
-            // Mantener campos legacy por compatibilidad
             experienceId: packageId,
             experienceSlug: packageSlug,
             experienceTitle: finalPackageTitle,
@@ -1593,16 +1586,10 @@ export async function POST(request: Request) {
             capacitySnapshot: {
               date,
               baseCapacity,
-              maxPeoplePerBooking: pkg ? resolveDepartureConfig(pkg, date).maxPeople : null,
+              maxPeoplePerBooking: pkg ? resolveExperienceDepartureConfig(pkg, date).maxPeople : null,
               hasSpecificDates: Boolean(pkg?.salidas?.length),
-              enabled: pkg ? resolveDepartureConfig(pkg, date).enabled : false,
+              enabled: pkg ? resolveExperienceDepartureConfig(pkg, date).enabled : false,
             },
-            packageSnapshot: {
-              id: packageId,
-              slug: packageSlug,
-              title: finalPackageTitle,
-            },
-            // Legacy field
             experienceSnapshot: {
               id: packageId,
               slug: packageSlug,
@@ -1675,7 +1662,7 @@ export async function POST(request: Request) {
         // Movimiento de stock (solo si está aprobado)
         if (!stockSnap.exists() && date && isApproved) {
           tx.set(stockRef, {
-            packageId,
+            experienceId: packageId,
             date,
             type: 'reserva',
             quantity: -people,
@@ -1700,7 +1687,7 @@ export async function POST(request: Request) {
             const heldPeople = Number((lockSnap.data() as any)?.heldPeople ?? 0);
             tx.update(lockRef, { heldPeople: Math.max(0, Math.floor(heldPeople - people)), updatedAt: now });
           } else {
-            tx.set(lockRef, { packageId, date, heldPeople: 0, createdAt: now, updatedAt: now });
+            tx.set(lockRef, { experienceId: packageId, date, heldPeople: 0, createdAt: now, updatedAt: now });
           }
         }
 
@@ -1758,7 +1745,7 @@ export async function POST(request: Request) {
             to: CONTACT_INFO.email,
             from,
             replyTo,
-            subject: `Nueva reserva: ${finalPackageTitle || 'Paquete'} — ${customerName || customerEmail}`,
+            subject: `Nueva reserva: ${finalPackageTitle || 'Experiencia'} — ${customerName || customerEmail}`,
             html: htmlAdmin,
             text: textAdmin,
             attempts: directSend.admin ? 1 : 0,

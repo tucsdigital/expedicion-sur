@@ -288,7 +288,7 @@ export default function AddonsManager({ items, onItemsChange, disabled, currentI
                         ) : null}
                       </div>
                     </div>
-                    <p className="mt-1 text-xs text-gray-500">Recomendado: 800x600 px. Se sube al guardar la excursión.</p>
+                    <p className="mt-1 text-xs text-gray-500">Recomendado: 800x600 px. Se sube al guardar la experiencia.</p>
                   </div>
                 </CardContent>
               ) : null}
@@ -395,14 +395,14 @@ function AddonImporter({
           Cargando excursiones con adicionales…
         </p>
       ) : packages.length === 0 ? (
-        <p className="text-sm text-gray-500">Ninguna otra excursión tiene adicionales para importar.</p>
+        <p className="text-sm text-gray-500">Ninguna otra experiencia tiene adicionales para importar.</p>
       ) : (
         <div className="space-y-3">
           <div>
-            <Label className="text-sm">Excursión de origen</Label>
+            <Label className="text-sm">Experiencia de origen</Label>
             <Select value={sourceId} onValueChange={setSourceId} disabled={disabled}>
               <SelectTrigger className="mt-1.5 bg-white">
-                <SelectValue placeholder="Elegí una excursión" />
+                <SelectValue placeholder="Elegí una experiencia" />
               </SelectTrigger>
               <SelectContent>
                 {packages.map((p) => (

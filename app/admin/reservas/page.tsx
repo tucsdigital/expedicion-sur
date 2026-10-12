@@ -20,11 +20,11 @@ import {
 } from 'lucide-react';
 
 import type { ReservationAttachmentInput } from '@/lib/reservas';
-import { getPaquetes } from '@/lib/paquetes';
+import { getExperiencias } from '@/lib/experiencias-catalog';
 import { useAuth } from '@/hooks/useAuth';
 
 import type { Reservation, ReservationStatus, ReservationAttachment } from '@/components/landing-reserva/types';
-import type { Order, Paquete } from '@/types';
+import type { Order, ExperienciaCatalogo } from '@/types';
 import {
   buildVentaStatuses,
   deriveAdminEmailStatus,
@@ -224,7 +224,7 @@ type SaleRow =
       id: string;
       sortAt: number;
       filterStatus: Reservation['status'];
-      packageId: string;
+      experienceId: string;
       date: string;
       paymentMethod: 'mercadopago' | 'admin';
       amountTotal: number;
@@ -237,7 +237,7 @@ type SaleRow =
       id: string;
       sortAt: number;
       filterStatus: Reservation['status'];
-      packageId: string;
+      experienceId: string;
       date: string;
       paymentMethod: 'mercadopago';
       amountTotal: number;
@@ -286,12 +286,12 @@ export default function ReservasPage() {
 
   const [reservas, setReservas] = useState<Reservation[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [paquetes, setPaquetes] = useState<Paquete[]>([]);
+  const [experiencias, setExperiencias] = useState<ExperienciaCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterPackageId, setFilterPackageId] = useState<string>('all');
+  const [filterExperienceId, setFilterExperienceId] = useState<string>('all');
   const [filterDate, setFilterDate] = useState('');
   const [statusFilters, setStatusFilters] = useState<Reservation['status'][]>(['reserved', 'completed', 'pending']);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<(typeof paymentOptions)[number]['value']>('all');
@@ -310,14 +310,14 @@ export default function ReservasPage() {
     try {
       if (!opts?.keepLoading) setLoading(true);
       const token = await user.getIdToken();
-      const [salesResponse, paquetesData] = await Promise.all([
+      const [salesResponse, experienciasData] = await Promise.all([
         fetch('/api/admin/ventas', {
           headers: {
             Authorization: `Bearer ${token}`,
           },
           cache: 'no-store',
         }),
-        getPaquetes(),
+        getExperiencias(),
       ]);
       const salesPayload = await salesResponse.json().catch(() => null);
       if (!salesResponse.ok) {
@@ -327,7 +327,7 @@ export default function ReservasPage() {
       const ordersData = Array.isArray(salesPayload?.orders) ? salesPayload.orders : [];
       setReservas(reservasData);
       setOrders(ordersData);
-      setPaquetes(paquetesData);
+      setExperiencias(experienciasData);
     } catch (error) {
       console.error('Error cargando ventas:', error);
       toast.error('Error al cargar ventas');
@@ -353,7 +353,7 @@ export default function ReservasPage() {
       id: reservation.id,
       sortAt: toTimestampMs(reservation.createdAt),
       filterStatus: reservation.status,
-      packageId: reservation.packageId || reservation.experienceId || '',
+      experienceId: reservation.experienceId || reservation.packageId || '',
       date: reservation.date,
       paymentMethod: reservation.createdByAdmin ? 'admin' : (reservation.paymentMethod ?? 'mercadopago'),
       amountTotal: reservation.amountTotal ?? 0,
@@ -381,7 +381,7 @@ export default function ReservasPage() {
           id: order.id,
           sortAt: toTimestampMs(order.createdAt),
           filterStatus: mapOrderToFilterStatus(order),
-          packageId: firstItem?.packageId ?? '',
+          experienceId: (firstItem as any)?.experienceId ?? firstItem?.packageId ?? '',
           date: firstItem?.date ?? '',
           paymentMethod: 'mercadopago',
           amountTotal: order.amountTotal ?? 0,
@@ -392,7 +392,7 @@ export default function ReservasPage() {
             order.customer?.email,
             order.payment?.paymentId,
             order.payment?.externalReference,
-            firstItem?.packageTitle,
+            (firstItem as any)?.experienceTitle ?? firstItem?.packageTitle,
             firstItem?.holdId,
             ...(firstItem?.selectedSeats ?? []),
           ]
@@ -408,8 +408,8 @@ export default function ReservasPage() {
 
   const ventasFiltradas = useMemo(() => {
     let list = ventas;
-    if (filterPackageId !== 'all') {
-      list = list.filter((sale) => sale.packageId === filterPackageId);
+    if (filterExperienceId !== 'all') {
+      list = list.filter((sale) => sale.experienceId === filterExperienceId);
     }
     if (filterDate.trim()) {
       list = list.filter((sale) => sale.date === filterDate.trim());
@@ -425,7 +425,7 @@ export default function ReservasPage() {
       list = list.filter((sale) => sale.searchIndex.includes(q));
     }
     return list;
-  }, [ventas, filterPackageId, filterDate, statusFilters, paymentMethodFilter, searchTerm]);
+  }, [ventas, filterExperienceId, filterDate, statusFilters, paymentMethodFilter, searchTerm]);
 
   const ventasPaginadas = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
@@ -434,7 +434,7 @@ export default function ReservasPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterPackageId, filterDate, statusFilters, paymentMethodFilter]);
+  }, [searchTerm, filterExperienceId, filterDate, statusFilters, paymentMethodFilter]);
 
   const totalAmount = useMemo(
     () => ventasFiltradas.reduce((acc, sale) => acc + (sale.amountTotal ?? 0), 0),
@@ -483,6 +483,7 @@ export default function ReservasPage() {
     attachments?: ReservationAttachmentInput[];
     enqueueCustomerVoucherEmail?: boolean;
     enqueueAdminNotificationEmail?: boolean;
+    sendEmailNow?: boolean;
   }) => {
     if (!user) {
       toast.error('Debés iniciar sesión para ejecutar esta acción');
@@ -528,12 +529,12 @@ export default function ReservasPage() {
         })
       );
 
-      toast.success('Venta actualizada');
+      toast.success(payload.sendEmailNow ? 'Email enviado' : 'Venta actualizada');
       fetchData({ keepLoading: true }).catch(() => null);
       return true;
     } catch (error) {
       console.error('[Ventas] Error actualizando venta:', error);
-      toast.error('No pudimos actualizar la venta');
+      toast.error(payload.sendEmailNow && error instanceof Error ? error.message : 'No pudimos actualizar la venta');
       return false;
     } finally {
       setActionLoadingId(null);
@@ -654,7 +655,7 @@ export default function ReservasPage() {
               <Table className="text-sm">
                 <TableHeader className="[&_tr]:border-black/5">
                   <TableRow className="border-black/5 hover:bg-transparent">
-                    <TableHead className="px-4">Paquete</TableHead>
+                    <TableHead className="px-4">Experiencia</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Monto</TableHead>
@@ -716,7 +717,7 @@ export default function ReservasPage() {
           <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-xl font-semibold text-gray-900">Ventas</h1>
-              <p className="text-sm text-gray-500">Compras, confirmaciones, vouchers, emails y operación por paquete/fecha</p>
+              <p className="text-sm text-gray-500">Compras, confirmaciones, vouchers, emails y operación por experiencia/fecha</p>
             </div>
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" size="sm">
@@ -784,7 +785,7 @@ export default function ReservasPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                   type="text"
-                  placeholder="Buscar por nombre, email, paquete o ID..."
+                  placeholder="Buscar por nombre, email, experiencia o ID..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   className="pl-10"
@@ -804,15 +805,15 @@ export default function ReservasPage() {
                 )}
               </div>
 
-              <Select value={filterPackageId} onValueChange={setFilterPackageId}>
+              <Select value={filterExperienceId} onValueChange={setFilterExperienceId}>
                 <SelectTrigger className="w-full sm:w-56 bg-white shadow-none ring-1 ring-black/5 rounded-xl">
-                  <SelectValue placeholder="Paquete" />
+                  <SelectValue placeholder="Experiencia" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {paquetes.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.titulo}
+                  {experiencias.map((experience) => (
+                    <SelectItem key={experience.id} value={experience.id}>
+                      {experience.titulo ?? (experience as any).title}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -859,7 +860,7 @@ export default function ReservasPage() {
             <Table className="text-sm">
               <TableHeader className="[&_tr]:border-black/5">
                 <TableRow className="border-black/5 hover:bg-transparent">
-                  <TableHead className="px-4">Paquete</TableHead>
+                  <TableHead className="px-4">Experiencia</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Monto</TableHead>
@@ -884,7 +885,7 @@ export default function ReservasPage() {
                           <TableCell className="px-4">
                             <div className="min-w-0">
                               <div className="font-semibold text-gray-900 truncate max-w-[320px]">
-                                {firstItem?.packageTitle || 'Orden sin paquete'}
+                                {(firstItem as any)?.experienceTitle || firstItem?.packageTitle || 'Orden sin experiencia'}
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-2">
                                 <Badge variant="outline" className="text-[11px]">
@@ -1079,11 +1080,12 @@ export default function ReservasPage() {
                                     updateReservation({
                                       reservationId: r.id,
                                       enqueueCustomerVoucherEmail: true,
+                                      sendEmailNow: true,
                                     })
                                   }
                                 >
                                   <MailCheck className="h-4 w-4" />
-                                  Reenviar voucher
+                                  Enviar voucher ahora
                                 </DropdownMenuItem>
 
                                 <DropdownMenuItem
@@ -1091,11 +1093,12 @@ export default function ReservasPage() {
                                     updateReservation({
                                       reservationId: r.id,
                                       enqueueAdminNotificationEmail: true,
+                                      sendEmailNow: true,
                                     })
                                   }
                                 >
                                   <Mail className="h-4 w-4" />
-                                  Reenviar aviso interno
+                                  Enviar aviso interno ahora
                                 </DropdownMenuItem>
 
                                 <DropdownMenuItem onClick={() => openReprogram(r)}>
@@ -1191,7 +1194,7 @@ export default function ReservasPage() {
         <DialogContent className="sm:max-w-[480px] rounded-2xl">
           <DialogHeader>
             <DialogTitle>Reprogramar fecha</DialogTitle>
-            <DialogDescription>Actualiza la fecha de la paquete y guarda el cambio en el historial.</DialogDescription>
+            <DialogDescription>Actualizá la fecha de la experiencia y guardá el cambio en el historial.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <label className="text-xs text-gray-500">Nueva fecha</label>

@@ -4,20 +4,78 @@ import { adminAuth } from '@/lib/firebaseAdmin';
 import type { Auth } from 'firebase-admin/auth';
 import { db } from '@/lib/firebase';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
-import { collection, doc, getDoc, getDocs, limit, query, Timestamp, updateDoc, where } from 'firebase/firestore';
-import { getPaqueteById } from '@/lib/paquetes';
+import { arrayUnion, collection, doc, getDoc, getDocs, limit, query, runTransaction, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { getExperienciaById } from '@/lib/experiencias-catalog';
 import { createReserva } from '@/lib/reservas';
 import { getStockDisponible, registrarMovimientoStock } from '@/lib/stock';
 import { computeCommission, nextPayoutStatusForReservationStatus } from '@/lib/referrals';
 import { getVendorById } from '@/lib/vendors';
 import type { SeatLayoutTemplate } from '@/types';
+import { guardVendor, toJson } from '@/lib/vendor-guard';
+import { isManualReservation, loadVendorReservations, toVendorRow } from '@/lib/vendor-reservations';
+import { getSeatDepartureId, seatIdsFromLabels } from '@/lib/seats/server';
+import { normalizeDigits, normalizeEmail } from '@/lib/reservas/code';
 import {
-  computeReservationPricing,
-  resolveDepartureConfig,
-  resolveReservationExtraSelections,
-} from '@/lib/packages/resolve-departure';
+  computeExperiencePricing,
+  resolveExperienceDepartureConfig,
+  resolveExperienceExtraSelections,
+} from '@/lib/experience-booking';
 
 export const runtime = 'nodejs';
+
+/** Lista y detalle de ventas del vendedor autenticado. */
+export async function GET(request: Request) {
+  const ctx = await guardVendor(request);
+  if (ctx instanceof NextResponse) return ctx;
+  const id = new URL(request.url).searchParams.get('id')?.trim();
+
+  try {
+    if (!id) {
+      return NextResponse.json({ ok: true, reservations: await loadVendorReservations(ctx.db, ctx.vendorId) });
+    }
+
+    const ref = ctx.db.collection('reservas').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists || (snap.data() as any)?.referredBy?.vendorId !== ctx.vendorId) {
+      return NextResponse.json({ error: 'Reserva no encontrada' }, { status: 404 });
+    }
+
+    const data = snap.data() as any;
+    const paymentsSnap = await ref.collection('payments').get();
+    const payments = paymentsSnap.docs
+      .map((payment) => toJson({ id: payment.id, ...payment.data() }))
+      .sort((a: any, b: any) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
+
+    return NextResponse.json({
+      ok: true,
+      reservation: {
+        ...toVendorRow(snap),
+        paymentMethod: data.paymentMethod ?? null,
+        peopleAdults: data.peopleAdults ?? null,
+        peopleMinors: data.peopleMinors ?? null,
+        customerPhone: data.customerPhone ?? null,
+        customerCountry: data.customerCountry ?? null,
+        customerDocument: data.customerDocument ?? null,
+        customerBirthDate: data.customerBirthDate ?? null,
+        customerComments: data.customerComments ?? null,
+        passengerDetails: toJson(data.passengerDetails ?? []),
+        selectedExtras: toJson(data.selectedExtras ?? []),
+        selectedSeats: data.selectedSeats ?? [],
+        baseSubtotalAmount: Number(data.baseSubtotalAmount) || 0,
+        extrasTotalAmount: Number(data.extrasTotalAmount) || 0,
+        attachments: toJson(data.attachments ?? []),
+        statusHistory: toJson(data.statusHistory ?? []),
+        commission: {
+          type: data.referredBy?.commissionType ?? null,
+          value: data.referredBy?.commissionValue ?? null,
+        },
+        payments,
+      },
+    });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'No se pudo cargar la reserva' }, { status: 500 });
+  }
+}
 
 const reservationStatusEnum = z.enum(['pending', 'reserved', 'completed', 'cancelled']);
 
@@ -31,6 +89,20 @@ const travelerSchema = z.object({
   travelerType: z.enum(['adult', 'minor']).nullable().optional(),
 });
 
+const vendorPatchSchema = z.object({
+  reservationId: z.string().min(1),
+  action: z.enum(['cancel', 'update']).default('update'),
+  note: z.string().max(500).optional(),
+  customerName: z.string().trim().min(2).max(120).optional(),
+  customerEmail: z.string().trim().email().optional(),
+  customerPhone: z.string().trim().max(40).nullable().optional(),
+  customerCountry: z.string().trim().max(40).nullable().optional(),
+  customerDocument: z.string().trim().max(40).nullable().optional(),
+  customerBirthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  customerComments: z.string().trim().max(500).nullable().optional(),
+  passengerDetails: z.array(travelerSchema).max(49).optional(),
+});
+
 const manualExtraSchema = z.object({
   title: z.string().min(1).max(120),
   price: z.number().min(0).max(999999999),
@@ -38,7 +110,9 @@ const manualExtraSchema = z.object({
 });
 
 const bodySchema = z.object({
-  packageId: z.string().min(1),
+  experienceId: z.string().min(1).optional(),
+  /** Compatibilidad con formularios/ventas anteriores durante la transición. */
+  packageId: z.string().min(1).optional(),
   date: z.string().min(1),
   people: z.number().int().min(1),
   customerEmail: z.string().email(),
@@ -54,6 +128,9 @@ const bodySchema = z.object({
   manualExtras: z.array(manualExtraSchema).max(20).optional(),
   status: reservationStatusEnum.optional(),
 }).superRefine((data, ctx) => {
+  if (!data.experienceId && !data.packageId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['experienceId'], message: 'Seleccioná una experiencia.' });
+  }
   const additionalTravelers = Math.max(0, data.people - 1);
   const passengerCount = Array.isArray(data.passengerDetails) ? data.passengerDetails.length : 0;
   if (passengerCount !== additionalTravelers) {
@@ -118,24 +195,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
   }
 
-  const paquete = await getPaqueteById(payload.packageId);
-  if (!paquete) {
-    return NextResponse.json({ error: 'Paquete no encontrado' }, { status: 404 });
+  const experienceId = String(payload.experienceId ?? payload.packageId ?? '').trim();
+  const experience = await getExperienciaById(experienceId);
+  if (!experience) {
+    return NextResponse.json({ error: 'Experiencia no encontrada' }, { status: 404 });
   }
 
     const vendorFull = await getVendorById(vendor.id).catch(() => null);
   if (!vendorFull || !vendorFull.active) {
     return NextResponse.json({ error: 'Vendedor no habilitado' }, { status: 403 });
   }
-    const allowedPackages = vendorFull.allowedPackages ?? vendorFull.allowedExperiences ?? null;
-    if (Array.isArray(allowedPackages) && allowedPackages.length > 0 && !allowedPackages.includes(payload.packageId)) {
-      return NextResponse.json({ error: 'No tenés permiso para este paquete.' }, { status: 403 });
+    const allowedExperiences = vendorFull.allowedExperiences ?? vendorFull.allowedPackages ?? null;
+    if (Array.isArray(allowedExperiences) && allowedExperiences.length > 0 && !allowedExperiences.includes(experienceId)) {
+      return NextResponse.json({ error: 'No tenés permiso para esta experiencia.' }, { status: 403 });
     }
 
   try {
-    const packageSlug = paquete.slug ?? paquete.id;
-    const bc = paquete.bookingConfig;
-    const departureConfig = resolveDepartureConfig(paquete, payload.date);
+    const experienceSlug = experience.slug ?? experience.id;
+    const bc = experience.bookingConfig;
+    const departureConfig = resolveExperienceDepartureConfig(experience, payload.date);
     const maxPeople = departureConfig.maxPeople;
     if (payload.people > maxPeople) {
       return NextResponse.json({ error: `Máximo permitido por reserva: ${maxPeople}` }, { status: 400 });
@@ -143,7 +221,7 @@ export async function POST(request: Request) {
     if (payload.date !== 'sin-fecha') {
       if (!departureConfig.exists || !departureConfig.enabled) {
         return NextResponse.json(
-          { error: 'La fecha seleccionada no está habilitada para este paquete.' },
+          { error: 'La fecha seleccionada no está habilitada para esta experiencia.' },
           { status: 400 }
         );
       }
@@ -160,8 +238,8 @@ export async function POST(request: Request) {
       }
       seatLayoutTemplateForExtras = { id: templateSnap.id, ...(templateSnap.data() as any) } as SeatLayoutTemplate;
     }
-    const selectedExtras = resolveReservationExtraSelections({
-      paquete,
+    const selectedExtras = resolveExperienceExtraSelections({
+      experiencia: experience,
       selectedExtraCodes,
       addonIds: Array.isArray((payload as any).addonIds)
         ? (payload as any).addonIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
@@ -175,7 +253,7 @@ export async function POST(request: Request) {
         : [],
       seatLayoutTemplate: seatLayoutTemplateForExtras,
     });
-    const repriced = computeReservationPricing(paquete, payload.date, {
+    const repriced = computeExperiencePricing(experience, payload.date, {
       people: payload.people,
       selectedExtras,
     });
@@ -191,7 +269,7 @@ export async function POST(request: Request) {
 
     const baseCapacity = payload.date !== 'sin-fecha' ? departureConfig.baseCapacity : 0;
     if (payload.date !== 'sin-fecha' && (payload.status ?? 'reserved') !== 'cancelled') {
-      const available = await getStockDisponible(paquete.id, payload.date, baseCapacity);
+      const available = await getStockDisponible(experience.id, payload.date, baseCapacity);
       if (payload.people > available) {
         return NextResponse.json(
           { error: `No hay cupo suficiente para esa fecha. Disponible: ${available}.` },
@@ -201,11 +279,11 @@ export async function POST(request: Request) {
     }
 
     const commissionOverride =
-      paquete.bookingConfig?.referralCommission
+      experience.bookingConfig?.referralCommission
         ? {
-            type: paquete.bookingConfig.referralCommission.type,
-            value: paquete.bookingConfig.referralCommission.value,
-            currency: paquete.bookingConfig.referralCommission.currency,
+            type: experience.bookingConfig.referralCommission.type,
+            value: experience.bookingConfig.referralCommission.value,
+            currency: experience.bookingConfig.referralCommission.currency,
           }
         : undefined;
     const comm = computeCommission({
@@ -227,13 +305,9 @@ export async function POST(request: Request) {
     };
 
     const reservaId = await createReserva({
-      packageId: paquete.id,
-      packageSlug: packageSlug,
-      packageTitle: paquete.titulo,
-      // Legacy compatibility
-      experienceId: paquete.id,
-      experienceSlug: packageSlug,
-      experienceTitle: paquete.titulo,
+      experienceId: experience.id,
+      experienceSlug,
+      experienceTitle: String(experience.titulo ?? (experience as any).title ?? ''),
       date: payload.date,
       people: payload.people,
       amountTotal,
@@ -264,9 +338,9 @@ export async function POST(request: Request) {
         enabled: departureConfig.enabled,
       },
       experienceSnapshot: {
-        id: paquete.id,
-        slug: packageSlug,
-        title: paquete.titulo,
+        id: experience.id,
+        slug: experienceSlug,
+        title: String(experience.titulo ?? (experience as any).title ?? ''),
       },
       selectedExtras: selectedExtras.length ? (selectedExtras as any) : null,
       customerBirthDate: payload.customerBirthDate,
@@ -276,7 +350,7 @@ export async function POST(request: Request) {
 
     if (payload.date !== 'sin-fecha' && (payload.status ?? 'reserved') !== 'cancelled') {
       await registrarMovimientoStock({
-        packageId: paquete.id,
+        experienceId: experience.id,
         date: payload.date,
         type: 'reserva',
         quantity: -payload.people,
@@ -316,11 +390,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: msg }, { status: 401 });
   }
 
-  const body = await request.json();
-  const reservationId = body.reservationId;
-  if (!reservationId) {
-    return NextResponse.json({ error: 'reservationId obligatorio' }, { status: 400 });
+  const parsedBody = vendorPatchSchema.safeParse(await request.json().catch(() => null));
+  if (!parsedBody.success) {
+    return NextResponse.json({ error: parsedBody.error.errors.map((issue) => issue.message).join(', ') || 'Datos inválidos' }, { status: 400 });
   }
+  const body = parsedBody.data;
+  const reservationId = body.reservationId;
 
   const reservaSnap = await getDoc(doc(db, 'reservas', reservationId));
   if (!reservaSnap.exists()) {
@@ -331,30 +406,117 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
   }
 
+  const manual = isManualReservation(reserva);
+  if (!manual) {
+    return NextResponse.json({ error: 'Las ventas online son de solo lectura. Contactá al equipo si necesitás un cambio.' }, { status: 403 });
+  }
+  if (reserva.status !== 'pending' && reserva.status !== 'reserved') {
+    return NextResponse.json({ error: 'Solo se pueden modificar ventas pendientes o reservadas.' }, { status: 409 });
+  }
+
+  if (body.action === 'cancel') {
+    try {
+      const now = Timestamp.now();
+      const experienceId = String(reserva.experienceId ?? reserva.packageId ?? '');
+      const date = String(reserva.date ?? '');
+      const experience = experienceId ? await getExperienciaById(experienceId) : null;
+      const departure = experience && date && date !== 'sin-fecha' ? resolveExperienceDepartureConfig(experience, date) : null;
+      const selectedSeats = Array.isArray(reserva.selectedSeats) ? reserva.selectedSeats.map(String) : [];
+      const seatLayoutId = String(reserva.seatLayoutId ?? departure?.seatLayoutId ?? '');
+
+      if (selectedSeats.length && seatLayoutId && departure?.seatsEnabled) {
+        const seatDepartureId = getSeatDepartureId(experienceId, date);
+        const seatReservationRef = doc(db, 'seatReservations', seatDepartureId);
+        const templateRef = doc(db, 'seatLayouts', seatLayoutId);
+        await runTransaction(db, async (transaction) => {
+          const [templateSnap, seatsSnap] = await Promise.all([
+            transaction.get(templateRef),
+            transaction.get(seatReservationRef),
+          ]);
+          if (!templateSnap.exists() || !seatsSnap.exists()) throw new Error('No se pudo liberar el mapa de butacas. Contactá al equipo.');
+          const template = { id: templateSnap.id, ...templateSnap.data() } as SeatLayoutTemplate;
+          const ids = seatIdsFromLabels(template, selectedSeats);
+          if (ids.length !== selectedSeats.length) throw new Error('Una o más butacas no existen en el mapa.');
+          const seatsMap: Record<string, any> = { ...((seatsSnap.data() as any)?.seats ?? {}) };
+          for (const id of ids) {
+            const seat = seatsMap[id];
+            if (!seat || String(seat.reservationId ?? '') !== reservationId) continue;
+            seatsMap[id] = {
+              status: 'available', holdId: null, cartId: null, cartItemId: null,
+              orderId: null, reservationId: null, expiresAt: null, blockedBy: null, updatedAt: now,
+            };
+          }
+          transaction.set(seatReservationRef, { seats: seatsMap, updatedAt: now }, { merge: true });
+        });
+      }
+
+      if (date && date !== 'sin-fecha' && Number(reserva.people) > 0) {
+        const baseCapacity = departure?.baseCapacity ?? 0;
+        await registrarMovimientoStock({
+          experienceId,
+          date,
+          type: 'entrada',
+          quantity: Number(reserva.people),
+          author: vendor.name,
+          referenceId: reservationId,
+          note: body.note?.trim() || 'Cancelada por el vendedor',
+          baseCapacityAtThatTime: baseCapacity,
+          amountTotal: Number(reserva.amountTotal) || 0,
+          currency: String(reserva.currency ?? 'ars'),
+        });
+      }
+
+      await updateDoc(doc(db, 'reservas', reservationId), {
+        status: 'cancelled',
+        updatedAt: now,
+        statusHistory: arrayUnion({
+          status: 'cancelled',
+          actor: 'vendor',
+          note: body.note?.trim() || 'Cancelada por el vendedor',
+          createdAt: now,
+        }),
+        ...(reserva.referredBy ? { 'referredBy.payoutStatus': nextPayoutStatusForReservationStatus('cancelled') } : {}),
+      });
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'No se pudo cancelar la reserva' }, { status: 500 });
+    }
+  }
+
   const updates: Record<string, any> = {
     updatedAt: Timestamp.now(),
   };
-  if (body.date !== undefined) updates.date = body.date;
-  if (body.customerName !== undefined) updates.customerName = body.customerName;
-  if (body.customerEmail !== undefined) updates.customerEmail = body.customerEmail;
-  if (body.customerPhone !== undefined) updates.customerPhone = body.customerPhone;
-  if (body.customerDocument !== undefined) updates.customerDocument = body.customerDocument;
-  if (body.customerBirthDate !== undefined) updates.customerBirthDate = body.customerBirthDate;
-  if (body.customerComments !== undefined) updates.customerComments = body.customerComments;
-  if (body.people !== undefined) updates.people = body.people;
-  if (body.peopleAdults !== undefined) updates.peopleAdults = body.peopleAdults;
-  if (body.peopleMinors !== undefined) updates.peopleMinors = body.peopleMinors;
-  if (body.selectedExtraCodes !== undefined) {
-    const paquete = await getPaqueteById(reserva.packageId ?? reserva.experienceId);
-    if (paquete) {
-      const extras = resolveReservationExtraSelections({
-        paquete,
-        selectedExtraCodes: body.selectedExtraCodes,
-      });
-      updates.selectedExtras = extras;
-      updates.extrasTotalAmount = extras.reduce((sum, e) => sum + e.amount, 0);
-    }
+  if (body.customerName !== undefined) {
+    updates.customerName = String(body.customerName).trim();
+    updates.customerNameLower = updates.customerName.toLowerCase();
   }
+  if (body.customerEmail !== undefined) {
+    updates.customerEmail = String(body.customerEmail).trim();
+    updates.customerEmailLower = normalizeEmail(updates.customerEmail);
+  }
+  if (body.customerPhone !== undefined) {
+    updates.customerPhone = body.customerPhone || null;
+    updates.customerPhoneNormalized = normalizeDigits(body.customerPhone);
+  }
+  if (body.customerDocument !== undefined) {
+    updates.customerDocument = body.customerDocument || null;
+    updates.customerDocumentNormalized = normalizeDigits(body.customerDocument);
+  }
+  if (body.customerCountry !== undefined) updates.customerCountry = body.customerCountry || null;
+  if (body.customerBirthDate !== undefined) updates.customerBirthDate = body.customerBirthDate;
+  if (body.customerComments !== undefined) updates.customerComments = body.customerComments || null;
+  if (body.passengerDetails !== undefined) {
+    if (body.passengerDetails.length !== Math.max(0, (Number(reserva.people) || 1) - 1)) {
+      return NextResponse.json({ error: 'La cantidad de pasajeros no coincide con la reserva.' }, { status: 400 });
+    }
+    updates.passengerDetails = body.passengerDetails;
+  }
+  updates.statusHistory = arrayUnion({
+    status: reserva.status,
+    actor: 'vendor',
+    note: body.note?.trim() || 'Datos actualizados por el vendedor',
+    createdAt: Timestamp.now(),
+  });
 
   try {
     await updateDoc(doc(db, 'reservas', reservationId), updates);

@@ -101,7 +101,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     const url = `${siteUrl}/excursion/${slug}`;
     return {
       title: buildPageTitle(slug),
-      description: `Excursión ${slug} en ${SITE_NAME}.`,
+      description: `Experiencia ${slug} en ${SITE_NAME}.`,
       alternates: { canonical: url },
     };
   }

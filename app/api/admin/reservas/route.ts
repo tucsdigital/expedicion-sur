@@ -6,7 +6,7 @@ import {
   removeReservaAttachmentsById,
   updateReservaStatus,
 } from '@/lib/reservas';
-import { getPaqueteById } from '@/lib/paquetes';
+import { getExperienciaById } from '@/lib/experiencias-catalog';
 import { requireAdminToken } from '@/lib/adminAuth';
 import { getStockDisponible, registrarMovimientoStock } from '@/lib/stock';
 import { randomUUID } from 'crypto';
@@ -34,11 +34,12 @@ import {
 } from '@/lib/emails/reserva-confirmada';
 import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
 import {
-  computeReservationPricing,
-  resolveDepartureConfig,
-  resolveReservationExtraSelections,
-} from '@/lib/packages/resolve-departure';
+  computeExperiencePricing,
+  resolveExperienceDepartureConfig,
+  resolveExperienceExtraSelections,
+} from '@/lib/experience-booking';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
+import { sendEmailJobNow } from '@/lib/sales/send-email-job';
 
 const COLLECTION = 'reservas';
 
@@ -75,8 +76,7 @@ const travelerSchema = z.object({
 
 /**
  * Adicional manual (creación/edición de reservas): título + precio los define
- * el admin, sin depender del catálogo del paquete. Es lo que permite sumar
- * un adicional creado para otra excursión.
+ * el admin, sin depender del catálogo de la experiencia de destino.
  */
 const manualExtraSchema = z.object({
   title: z.string().min(1).max(120),
@@ -85,7 +85,9 @@ const manualExtraSchema = z.object({
 });
 
 const adminReservaSchema = z.object({
-  packageId: z.string().min(1),
+  experienceId: z.string().min(1).optional(),
+  /** Compatibilidad de lectura para formularios antiguos durante el despliegue. */
+  packageId: z.string().min(1).optional(),
   date: z.string().min(1),
   people: z.number().int().min(1).optional(),
   peopleAdults: z.number().int().min(0).max(50).optional(),
@@ -110,6 +112,9 @@ const adminReservaSchema = z.object({
   addonIds: z.array(z.string().min(1).max(80)).max(20).optional(),
   manualExtras: z.array(manualExtraSchema).max(20).optional(),
   selectedSeats: z.array(z.string().min(1).max(20)).max(200).optional(),
+}).refine((data) => Boolean(data.experienceId || data.packageId), {
+  message: 'Seleccioná una experiencia.',
+  path: ['experienceId'],
 }).refine((data) => {
   const a = typeof data.peopleAdults === 'number' ? data.peopleAdults : 0;
   const m = typeof data.peopleMinors === 'number' ? data.peopleMinors : 0;
@@ -151,6 +156,7 @@ const adminUpdateSchema = z.object({
   clearReferredBy: z.boolean().optional(),
   enqueueCustomerVoucherEmail: z.boolean().optional(),
   enqueueAdminNotificationEmail: z.boolean().optional(),
+  sendEmailNow: z.boolean().optional(),
   addPaymentEvent: paymentMovementSchema.optional(),
   /** Sumar un adicional existente a una venta ya creada (edición). */
   addAddonExtra: manualExtraSchema.optional(),
@@ -177,17 +183,21 @@ function getErrorMessage(error: unknown, fallback = 'Error desconocido'): string
   return error instanceof Error ? error.message : fallback;
 }
 
-function getBaseCapacity(
-  paquete: Awaited<ReturnType<typeof getPaqueteById>> | null,
-  date: string
-): number {
-  if (!paquete) return 0;
-  return resolveDepartureConfig(paquete, date).baseCapacity;
+function getExperienceIdFromReservation(reservation: Record<string, any>): string {
+  return String(reservation.experienceId ?? reservation.packageId ?? '').trim();
 }
 
-function isEnabledDate(paquete: Awaited<ReturnType<typeof getPaqueteById>> | null, date: string): boolean {
-  if (!paquete) return false;
-  return resolveDepartureConfig(paquete, date).enabled;
+function getBaseCapacity(
+  experience: Awaited<ReturnType<typeof getExperienciaById>> | null,
+  date: string
+): number {
+  if (!experience) return 0;
+  return resolveExperienceDepartureConfig(experience, date).baseCapacity;
+}
+
+function isEnabledDate(experience: Awaited<ReturnType<typeof getExperienciaById>> | null, date: string): boolean {
+  if (!experience) return false;
+  return resolveExperienceDepartureConfig(experience, date).enabled;
 }
 
 function formatEmailDate(date: string): string {
@@ -226,7 +236,7 @@ function normalizePaymentMovementMethod(method: string, movementType: z.infer<ty
 }
 
 async function resolveReservationReferralAssignment(params: {
-  packageId: string;
+  experienceId: string;
   amountTotal: number;
   people: number;
   status: z.infer<typeof reservationStatusEnum>;
@@ -234,18 +244,18 @@ async function resolveReservationReferralAssignment(params: {
   referralCode?: string;
   existingPayoutStatus?: 'pending' | 'accrued' | 'paid' | 'cancelled' | null;
 }) {
-  const packageId = String(params.packageId || '').trim();
-  if (!packageId) {
-    throw new Error('No se pudo identificar el paquete de la venta.');
+  const experienceId = String(params.experienceId || '').trim();
+  if (!experienceId) {
+    throw new Error('No se pudo identificar la experiencia de la venta.');
   }
 
-  const paquete = await getPaqueteById(packageId).catch(() => null);
+  const experience = await getExperienciaById(experienceId).catch(() => null);
   const commissionOverride =
-    paquete?.bookingConfig?.referralCommission
+    experience?.bookingConfig?.referralCommission
       ? {
-          type: paquete.bookingConfig.referralCommission.type,
-          value: paquete.bookingConfig.referralCommission.value,
-          currency: paquete.bookingConfig.referralCommission.currency,
+          type: experience.bookingConfig.referralCommission.type,
+          value: experience.bookingConfig.referralCommission.value,
+          currency: experience.bookingConfig.referralCommission.currency,
         }
       : undefined;
   const payoutStatus =
@@ -259,16 +269,16 @@ async function resolveReservationReferralAssignment(params: {
     if (!link) {
       throw new Error('El código de vendedor no existe o está inactivo.');
     }
-    if (link.experienceId && String(link.experienceId) !== packageId) {
-      throw new Error('El código elegido no corresponde a este paquete.');
+    if (link.experienceId && String(link.experienceId) !== experienceId) {
+      throw new Error('El código elegido no corresponde a esta experiencia.');
     }
     const vendor = await getVendorById(link.vendorId).catch(() => null);
     if (!vendor || !vendor.active) {
       throw new Error('El vendedor asociado al código no está disponible.');
     }
-    const allowedPackages = vendor.allowedPackages ?? vendor.allowedExperiences ?? null;
-    if (Array.isArray(allowedPackages) && allowedPackages.length > 0 && !allowedPackages.includes(packageId)) {
-      throw new Error('El vendedor no tiene habilitado este paquete.');
+    const allowedExperiences = vendor.allowedExperiences ?? vendor.allowedPackages ?? null;
+    if (Array.isArray(allowedExperiences) && allowedExperiences.length > 0 && !allowedExperiences.includes(experienceId)) {
+      throw new Error('El vendedor no tiene habilitada esta experiencia.');
     }
     const comm = computeCommission({
       amountTotal: params.amountTotal,
@@ -295,9 +305,9 @@ async function resolveReservationReferralAssignment(params: {
     if (!vendor || !vendor.active) {
       throw new Error('El vendedor seleccionado no está disponible.');
     }
-    const allowedPackages = vendor.allowedPackages ?? vendor.allowedExperiences ?? null;
-    if (Array.isArray(allowedPackages) && allowedPackages.length > 0 && !allowedPackages.includes(packageId)) {
-      throw new Error('El vendedor seleccionado no opera este paquete.');
+    const allowedExperiences = vendor.allowedExperiences ?? vendor.allowedPackages ?? null;
+    if (Array.isArray(allowedExperiences) && allowedExperiences.length > 0 && !allowedExperiences.includes(experienceId)) {
+      throw new Error('El vendedor seleccionado no tiene habilitada esta experiencia.');
     }
     const comm = computeCommission({
       amountTotal: params.amountTotal,
@@ -355,7 +365,7 @@ async function enqueueReservationEmailJob(options: {
     : undefined;
   const emailData = {
     customerName: reservation.customerName ?? '',
-    experienceTitle: reservation.packageTitle || reservation.experienceTitle || SITE_NAME,
+    experienceTitle: reservation.experienceTitle || reservation.packageTitle || SITE_NAME,
     dateFormatted: formatEmailDate(reservation.date),
     peopleLabel,
     seatsLabel,
@@ -370,15 +380,22 @@ async function enqueueReservationEmailJob(options: {
   };
 
   const now = Timestamp.now();
-  const jobId = options.jobId || `${options.reservationId}_${options.type}_${Date.now()}`;
+  const existingJobId = options.type === 'admin_aviso'
+    ? (reservation as any).emailDelivery?.adminNotification?.jobId
+    : options.type === 'cliente_voucher_48hs'
+      ? (reservation as any).emailDelivery?.customerVoucher?.jobId
+      : (reservation as any).emailDelivery?.customerConfirmation?.jobId;
+  // Reutilizar el job asociado evita que quede activo el voucher programado
+  // anterior después de un reenvío inmediato.
+  const jobId = options.jobId || String(existingJobId ?? '').trim() || `${options.reservationId}_${options.type}_${Date.now()}`;
   const emailJobRef = doc(db, 'emailJobs', jobId);
   const reservationRef = doc(db, COLLECTION, options.reservationId);
   const subject =
     options.type === 'cliente_confirmacion_compra'
-      ? `Compra confirmada: ${reservation.packageTitle || reservation.experienceTitle || SITE_NAME}`
+      ? `Compra confirmada: ${reservation.experienceTitle || reservation.packageTitle || SITE_NAME}`
       : options.type === 'cliente_voucher_48hs'
-        ? `Recordatorio de salida (48 hs): ${reservation.packageTitle || reservation.experienceTitle || SITE_NAME}`
-      : `Nueva venta: ${reservation.packageTitle || reservation.experienceTitle || 'Paquete'} — ${reservation.customerName || reservation.customerEmail}`;
+        ? `Recordatorio de salida (48 hs): ${reservation.experienceTitle || reservation.packageTitle || SITE_NAME}`
+      : `Nueva venta: ${reservation.experienceTitle || reservation.packageTitle || 'Experiencia'} — ${reservation.customerName || reservation.customerEmail}`;
   const to =
     options.type === 'cliente_confirmacion_compra' || options.type === 'cliente_voucher_48hs'
       ? reservation.customerEmail
@@ -439,6 +456,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     payload = adminReservaSchema.parse({
       ...body,
+      experienceId: body.experienceId ?? body.packageId,
       date: parseDate(body.date),
     });
   } catch (error) {
@@ -452,15 +470,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
   }
 
-  const paquete = await getPaqueteById(payload.packageId);
-  if (!paquete) {
-    return NextResponse.json({ error: 'Paquete no encontrado' }, { status: 404 });
+  const experienceId = String(payload.experienceId ?? payload.packageId ?? '').trim();
+  const experience = await getExperienciaById(experienceId);
+  if (!experience) {
+    return NextResponse.json({ error: 'Experiencia no encontrada' }, { status: 404 });
   }
 
   try {
-    const packageSlug = paquete.slug ?? paquete.id;
-    const bc = paquete.bookingConfig;
-    const departureConfig = resolveDepartureConfig(paquete, payload.date);
+    const experienceSlug = experience.slug ?? experience.id;
+    const bc = experience.bookingConfig;
+    const departureConfig = resolveExperienceDepartureConfig(experience, payload.date);
     const maxPeople = departureConfig.maxPeople;
     const adults = Math.max(0, Number((payload as any).peopleAdults ?? 0) || 0);
     const minors = Math.max(0, Number((payload as any).peopleMinors ?? 0) || 0);
@@ -475,11 +494,11 @@ export async function POST(request: Request) {
     if (people > maxPeople) {
       return NextResponse.json({ error: `Máximo permitido por reserva: ${maxPeople}` }, { status: 400 });
     }
-    if (!isEnabledDate(paquete, payload.date)) {
-      return NextResponse.json({ error: 'La fecha seleccionada no está habilitada para este paquete.' }, { status: 400 });
+    if (!isEnabledDate(experience, payload.date)) {
+      return NextResponse.json({ error: 'La fecha seleccionada no está habilitada para esta experiencia.' }, { status: 400 });
     }
 
-    const computedPricing = computeReservationPricing(paquete, payload.date, {
+    const computedPricing = computeExperiencePricing(experience, payload.date, {
       people,
       peopleAdults,
       peopleMinors,
@@ -492,13 +511,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Falta precio base para calcular porcentaje.' }, { status: 400 });
     }
     if (!Number.isFinite(unitAmount) || unitAmount < 1 || computedPricing.subtotalAmount < 1) {
-      return NextResponse.json({ error: 'Este paquete no tiene configurado un valor de reserva válido.' }, { status: 400 });
+      return NextResponse.json({ error: 'Esta experiencia no tiene configurado un valor de reserva válido.' }, { status: 400 });
     }
     const amountTotal = computedPricing.subtotalAmount;
 
-    const baseCapacity = payload.date !== 'sin-fecha' ? getBaseCapacity(paquete, payload.date) : 0;
+    const baseCapacity = payload.date !== 'sin-fecha' ? getBaseCapacity(experience, payload.date) : 0;
     if (!allowOverbook && payload.date !== 'sin-fecha' && (payload.status ?? 'reserved') !== 'cancelled') {
-      const available = await getStockDisponible(paquete.id, payload.date, baseCapacity);
+      const available = await getStockDisponible(experience.id, payload.date, baseCapacity);
       if (people > available) {
         return NextResponse.json(
           { error: `No hay cupo suficiente para esa fecha. Disponible: ${available}.` },
@@ -532,8 +551,8 @@ export async function POST(request: Request) {
       }
       seatLayoutTemplateForExtras = { id: templateSnap.id, ...(templateSnap.data() as any) } as SeatLayoutTemplate;
     }
-    const selectedExtras = resolveReservationExtraSelections({
-      paquete,
+    const selectedExtras = resolveExperienceExtraSelections({
+      experiencia: experience,
       selectedExtraCodes,
       addonIds: Array.isArray((payload as any).addonIds)
         ? (payload as any).addonIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
@@ -547,7 +566,7 @@ export async function POST(request: Request) {
         : [],
       seatLayoutTemplate: seatLayoutTemplateForExtras,
     });
-    const repriced = computeReservationPricing(paquete, payload.date, {
+    const repriced = computeExperiencePricing(experience, payload.date, {
       people,
       peopleAdults,
       peopleMinors,
@@ -557,7 +576,7 @@ export async function POST(request: Request) {
     });
 
     const referredBy = await resolveReservationReferralAssignment({
-      packageId: paquete.id,
+      experienceId: experience.id,
       amountTotal: repriced.subtotalAmount,
       people,
       status: payload.status ?? 'reserved',
@@ -583,7 +602,7 @@ export async function POST(request: Request) {
     const reservaRef = doc(collection(db, COLLECTION));
     const stockRef = payload.date !== 'sin-fecha' ? doc(db, 'stockMovimientos', `admin_${reservaRef.id}`) : null;
     const seatsNeeded = Boolean(seatsEnabled && seatLayoutId && payload.date !== 'sin-fecha');
-    const departureId = getSeatDepartureId(paquete.id, payload.date);
+    const departureId = getSeatDepartureId(experience.id, payload.date);
     const seatResRef = doc(db, 'seatReservations', departureId);
 
     try {
@@ -596,7 +615,7 @@ export async function POST(request: Request) {
         // (`admin_${reservaRef.id}`), así que se escribe directo sin leer.
         if (stockRef && status !== 'cancelled') {
           tx.set(stockRef, {
-            packageId: paquete.id,
+            experienceId: experience.id,
             date: payload.date,
             type: 'reserva',
             quantity: -people,
@@ -627,7 +646,7 @@ export async function POST(request: Request) {
             tx.set(
               seatResRef,
               {
-                packageId: paquete.id,
+                experienceId: experience.id,
                 date: payload.date,
                 seatLayoutId,
                 seats: seatsMap,
@@ -682,12 +701,9 @@ export async function POST(request: Request) {
         const customerDocumentNormalized = normalizeDigits(payload.customerDocument);
 
         tx.set(reservaRef, {
-          packageId: paquete.id,
-          packageSlug: paquete.slug,
-          packageTitle: paquete.titulo,
-          experienceId: paquete.id,
-          experienceSlug: paquete.slug,
-          experienceTitle: paquete.titulo,
+          experienceId: experience.id,
+          experienceSlug: experience.slug,
+          experienceTitle: String(experience.titulo ?? (experience as any).title ?? ''),
           date: payload.date,
           people,
           peopleAdults,
@@ -735,18 +751,13 @@ export async function POST(request: Request) {
             date: payload.date,
             baseCapacity,
             maxPeoplePerBooking: departureConfig.maxPeople,
-            hasSpecificDates: Boolean(paquete.salidas?.length),
+            hasSpecificDates: Boolean(experience.salidas?.length),
             enabled: departureConfig.enabled,
           },
           experienceSnapshot: {
-            id: paquete.id,
-            slug: paquete.slug,
-            title: paquete.titulo,
-          },
-          packageSnapshot: {
-            id: paquete.id,
-            slug: paquete.slug,
-            title: paquete.titulo,
+            id: experience.id,
+            slug: experience.slug,
+            title: String(experience.titulo ?? (experience as any).title ?? ''),
           },
           statusHistory: [
             {
@@ -833,9 +844,10 @@ export async function PATCH(request: Request) {
     if (payload.status && payload.status !== reservation.status) {
       // Validación de cupo si se reactiva una cancelada.
       if (reservation.status === 'cancelled' && payload.status !== 'cancelled' && reservation.date !== 'sin-fecha') {
-        const paquete = await getPaqueteById(reservation.packageId ?? reservation.experienceId);
-        const baseCapacity = getBaseCapacity(paquete, reservation.date);
-        const available = await getStockDisponible(reservation.packageId ?? reservation.experienceId, reservation.date, baseCapacity);
+        const experienceId = getExperienceIdFromReservation(reservation as any);
+        const experience = await getExperienciaById(experienceId);
+        const baseCapacity = getBaseCapacity(experience, reservation.date);
+        const available = await getStockDisponible(experienceId, reservation.date, baseCapacity);
         if (reservation.people > available) {
           return NextResponse.json(
             { error: `No hay cupo suficiente para reactivar. Disponible: ${available}.` },
@@ -848,12 +860,13 @@ export async function PATCH(request: Request) {
       const seatLayoutId = (reservation as any).seatLayoutId ? String((reservation as any).seatLayoutId) : '';
       const shouldTouchSeats = hasSeats && seatLayoutId && reservation.date && reservation.date !== 'sin-fecha';
       if (shouldTouchSeats) {
-        const paquete = await getPaqueteById(reservation.packageId ?? reservation.experienceId);
-        const seatsEnabled = paquete ? resolveDepartureConfig(paquete, reservation.date).seatsEnabled : false;
+        const experienceId = getExperienceIdFromReservation(reservation as any);
+        const experience = await getExperienciaById(experienceId);
+        const seatsEnabled = experience ? resolveExperienceDepartureConfig(experience, reservation.date).seatsEnabled : false;
         if (seatsEnabled) {
           const selectedSeatLabels = (reservation as any).selectedSeats.map((s: any) => String(s));
           const nextSeatStatus: SeatStatus = payload.status === 'completed' ? 'paid' : payload.status === 'cancelled' ? 'available' : 'reserved';
-          const seatDepartureId = getSeatDepartureId(String(reservation.packageId ?? reservation.experienceId), reservation.date);
+          const seatDepartureId = getSeatDepartureId(experienceId, reservation.date);
           const seatResRef = doc(db, 'seatReservations', seatDepartureId);
           const templateRef = doc(db, 'seatLayouts', seatLayoutId);
           try {
@@ -903,10 +916,11 @@ export async function PATCH(request: Request) {
       }
 
       if (payload.status === 'cancelled') {
-        const paquete = await getPaqueteById(reservation.packageId ?? reservation.experienceId);
-        const baseCapacity = getBaseCapacity(paquete, reservation.date);
+        const experienceId = getExperienceIdFromReservation(reservation as any);
+        const experience = await getExperienciaById(experienceId);
+        const baseCapacity = getBaseCapacity(experience, reservation.date);
         await registrarMovimientoStock({
-          packageId: reservation.packageId ?? reservation.experienceId,
+          experienceId,
           date: reservation.date,
           type: 'entrada',
           quantity: reservation.people,
@@ -918,10 +932,11 @@ export async function PATCH(request: Request) {
           currency: reservation.currency,
         });
       } else if (reservation.status === 'cancelled') {
-        const paquete = await getPaqueteById(reservation.packageId ?? reservation.experienceId);
-        const baseCapacity = getBaseCapacity(paquete, reservation.date);
+        const experienceId = getExperienceIdFromReservation(reservation as any);
+        const experience = await getExperienciaById(experienceId);
+        const baseCapacity = getBaseCapacity(experience, reservation.date);
         await registrarMovimientoStock({
-          packageId: reservation.packageId ?? reservation.experienceId,
+          experienceId,
           date: reservation.date,
           type: 'reserva',
           quantity: -reservation.people,
@@ -945,19 +960,20 @@ export async function PATCH(request: Request) {
       }
     }
     if (payload.date && payload.date !== reservation.date) {
-      const paquete = await getPaqueteById(reservation.packageId ?? reservation.experienceId);
-      if (!paquete) {
-        return NextResponse.json({ error: 'Paquete no encontrado' }, { status: 404 });
+      const experienceId = getExperienceIdFromReservation(reservation as any);
+      const experience = await getExperienciaById(experienceId);
+      if (!experience) {
+        return NextResponse.json({ error: 'Experiencia no encontrada' }, { status: 404 });
       }
-      if (!isEnabledDate(paquete, payload.date)) {
-        return NextResponse.json({ error: 'La nueva fecha no está habilitada para este paquete.' }, { status: 400 });
+      if (!isEnabledDate(experience, payload.date)) {
+        return NextResponse.json({ error: 'La nueva fecha no está habilitada para esta experiencia.' }, { status: 400 });
       }
-      const baseCapacityNew = payload.date !== 'sin-fecha' ? getBaseCapacity(paquete, payload.date) : 0;
-      const baseCapacityOld = reservation.date !== 'sin-fecha' ? getBaseCapacity(paquete, reservation.date) : 0;
+      const baseCapacityNew = payload.date !== 'sin-fecha' ? getBaseCapacity(experience, payload.date) : 0;
+      const baseCapacityOld = reservation.date !== 'sin-fecha' ? getBaseCapacity(experience, reservation.date) : 0;
 
       // Si la reserva está activa, mover cupo: liberar fecha vieja y reservar fecha nueva.
       if (reservation.status !== 'cancelled' && reservation.date !== 'sin-fecha' && payload.date !== 'sin-fecha') {
-        const availableNew = await getStockDisponible(reservation.packageId ?? reservation.experienceId, payload.date, baseCapacityNew);
+        const availableNew = await getStockDisponible(experienceId, payload.date, baseCapacityNew);
         if (reservation.people > availableNew) {
           return NextResponse.json(
             { error: `No hay cupo suficiente en la nueva fecha. Disponible: ${availableNew}.` },
@@ -965,7 +981,7 @@ export async function PATCH(request: Request) {
           );
         }
         await registrarMovimientoStock({
-          packageId: reservation.packageId ?? reservation.experienceId,
+          experienceId,
           date: reservation.date,
           type: 'entrada',
           quantity: reservation.people,
@@ -977,7 +993,7 @@ export async function PATCH(request: Request) {
           currency: reservation.currency,
         });
         await registrarMovimientoStock({
-          packageId: reservation.packageId ?? reservation.experienceId,
+          experienceId,
           date: payload.date,
           type: 'reserva',
           quantity: -reservation.people,
@@ -1003,9 +1019,9 @@ export async function PATCH(request: Request) {
         capacitySnapshot: {
           date: payload.date,
           baseCapacity: baseCapacityNew,
-          maxPeoplePerBooking: typeof paquete.bookingConfig?.maxPeoplePerBooking === 'number' ? paquete.bookingConfig.maxPeoplePerBooking : null,
-          hasSpecificDates: Boolean(paquete.bookingConfig?.hasSpecificDates),
-          enabled: paquete.bookingConfig?.enabled !== false,
+          maxPeoplePerBooking: typeof experience.bookingConfig?.maxPeoplePerBooking === 'number' ? experience.bookingConfig.maxPeoplePerBooking : null,
+          hasSpecificDates: Boolean(experience.salidas?.length),
+          enabled: experience.bookingConfig?.enabled !== false,
         },
       });
 
@@ -1053,7 +1069,7 @@ export async function PATCH(request: Request) {
       });
     } else if (payload.vendorId || payload.referralCode) {
       const referredBy = await resolveReservationReferralAssignment({
-        packageId: String(reservation.packageId ?? reservation.experienceId ?? ''),
+        experienceId: getExperienceIdFromReservation(reservation as any),
         amountTotal: reservation.amountTotal ?? 0,
         people: reservation.people ?? 0,
         status: payload.status ?? reservation.status,
@@ -1157,22 +1173,30 @@ export async function PATCH(request: Request) {
     }
 
     if (payload.enqueueCustomerVoucherEmail) {
-      await enqueueReservationEmailJob({
+      const jobId = await enqueueReservationEmailJob({
         reservationId: payload.reservationId,
         type: 'cliente_voucher_48hs',
       });
+      if (payload.sendEmailNow) {
+        const result = await sendEmailJobNow(jobId);
+        if (!result.ok) throw new Error(result.error);
+      }
     }
 
     if (payload.enqueueAdminNotificationEmail) {
-      await enqueueReservationEmailJob({
+      const jobId = await enqueueReservationEmailJob({
         reservationId: payload.reservationId,
         type: 'admin_aviso',
       });
+      if (payload.sendEmailNow) {
+        const result = await sendEmailJobNow(jobId);
+        if (!result.ok) throw new Error(result.error);
+      }
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[admin/reservas] Error actualizando reserva:', error);
-    return NextResponse.json({ error: 'No se pudo actualizar la reserva' }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'No se pudo actualizar la reserva' }, { status: 500 });
   }
 }

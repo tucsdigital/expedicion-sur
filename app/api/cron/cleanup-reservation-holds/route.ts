@@ -97,14 +97,14 @@ async function processExpiredHolds(request: Request) {
       const data = snap.data() as any;
       if (String(data.status ?? '') !== 'active') return { ok: true as const, released: false as const };
 
-      const packageId = String(data.packageId ?? '').trim();
+      const experienceId = String(data.experienceId ?? data.packageId ?? '').trim();
       const date = String(data.date ?? '').trim();
       const people = Math.max(0, Number(data.people ?? 0) || 0);
 
       tx.update(holdRef, { status: 'released', releasedAt: now, releaseReason: 'expired', updatedAt: now });
 
-      if (packageId && date && date !== 'sin-fecha' && people > 0) {
-        const lockRef = doc(db, 'stockHolds', `${packageId}_${date}`);
+      if (experienceId && date && date !== 'sin-fecha' && people > 0) {
+        const lockRef = doc(db, 'stockHolds', `${experienceId}_${date}`);
         const lockSnap = await tx.get(lockRef);
         const heldPeople = lockSnap.exists() ? Number((lockSnap.data() as any)?.heldPeople ?? 0) : 0;
         if (lockSnap.exists()) {
@@ -121,4 +121,3 @@ async function processExpiredHolds(request: Request) {
 
   return NextResponse.json({ ok: true, processed: processed.length, released });
 }
-

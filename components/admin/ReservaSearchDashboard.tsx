@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { Paquete } from '@/types';
+import type { ExperienciaCatalogo } from '@/types';
 import { toast } from 'sonner';
 
 type ResultItem = {
@@ -21,7 +21,7 @@ type ResultItem = {
   operationalStatusLabel?: string;
   paymentStatus?: string;
   paymentStatusLabel?: string;
-  packageTitle: string;
+  experienceTitle: string;
   date: string;
   people: number;
   selectedSeats?: string[] | null;
@@ -50,10 +50,10 @@ function formatAmount(amountTotal: number | undefined, currency: string | undefi
   return `${v.toFixed(2)} ${c}`;
 }
 
-export default function ReservaSearchDashboard({ paquetes }: { paquetes: Paquete[] }) {
+export default function ReservaSearchDashboard({ experiencias }: { experiencias: ExperienciaCatalogo[] }) {
   const { user } = useAuth();
   const [q, setQ] = useState('');
-  const [packageId, setPackageId] = useState<string>('all');
+  const [experienceId, setExperienceId] = useState<string>('all');
   const [date, setDate] = useState<string>('');
   const [status, setStatus] = useState<string>('all');
   const [paymentMethod, setPaymentMethod] = useState<string>('all');
@@ -73,7 +73,7 @@ export default function ReservaSearchDashboard({ paquetes }: { paquetes: Paquete
       const token = await user.getIdToken();
       const params = new URLSearchParams();
       params.set('q', queryText);
-      if (packageId !== 'all') params.set('packageId', packageId);
+      if (experienceId !== 'all') params.set('experienceId', experienceId);
       if (date) params.set('date', date);
       if (status !== 'all') params.set('status', status);
       if (paymentMethod !== 'all') params.set('paymentMethod', paymentMethod);
@@ -96,9 +96,9 @@ export default function ReservaSearchDashboard({ paquetes }: { paquetes: Paquete
     }
   };
 
-  const paquetesOptions = useMemo(() => {
-    return [...paquetes].sort((a, b) => String(a.titulo).localeCompare(String(b.titulo)));
-  }, [paquetes]);
+  const experienceOptions = useMemo(() => {
+    return [...experiencias].sort((a, b) => String(a.titulo).localeCompare(String(b.titulo)));
+  }, [experiencias]);
 
   return (
     <div className="space-y-6">
@@ -132,16 +132,16 @@ export default function ReservaSearchDashboard({ paquetes }: { paquetes: Paquete
 
           <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-1">
-              <Label>Paquete</Label>
-              <Select value={packageId} onValueChange={setPackageId}>
+              <Label>Experiencia</Label>
+              <Select value={experienceId} onValueChange={setExperienceId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Todos" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {paquetesOptions.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.titulo}
+                  {experienceOptions.map((experience) => (
+                    <SelectItem key={experience.id} value={experience.id}>
+                      {experience.titulo}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -206,7 +206,7 @@ export default function ReservaSearchDashboard({ paquetes }: { paquetes: Paquete
                   <tr>
                     <th className="py-2 pr-4">Código</th>
                     <th className="py-2 pr-4">Cliente</th>
-                    <th className="py-2 pr-4">Paquete</th>
+                    <th className="py-2 pr-4">Experiencia</th>
                     <th className="py-2 pr-4">Fecha</th>
                     <th className="py-2 pr-4">Estado</th>
                     <th className="py-2 pr-4">Pago</th>
@@ -226,7 +226,7 @@ export default function ReservaSearchDashboard({ paquetes }: { paquetes: Paquete
                         <div className="text-xs text-gray-500">{r.customerEmail || '—'}</div>
                         {r.mercadoPagoPaymentId ? <div className="text-xs text-gray-400">MP: {r.mercadoPagoPaymentId}</div> : null}
                       </td>
-                      <td className="py-3 pr-4">{r.packageTitle}</td>
+                      <td className="py-3 pr-4">{r.experienceTitle}</td>
                       <td className="py-3 pr-4">{formatDateLabel(r.date)}</td>
                       <td className="py-3 pr-4">
                         <div>{r.commercialStatusLabel || r.status}</div>

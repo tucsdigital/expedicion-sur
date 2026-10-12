@@ -9,7 +9,7 @@ import {
   runTransaction,
   updateDoc,
 } from 'firebase/firestore';
-import { getPaqueteById } from '@/lib/paquetes';
+import { getExperienciaById } from '@/lib/experiencias-catalog';
 import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
 import {
   buildAdminNuevaReservaHtml,
@@ -24,7 +24,7 @@ import { getPayment, isPaymentApproved, mapPaymentStatusToReservationStatus, sea
 import { normalizeDigits, normalizeEmail, reserveNextReservationCode } from '@/lib/reservas/code';
 import { buildQueuedEmailDelivery } from '@/lib/sales/status';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
-import { resolveDepartureConfig } from '@/lib/packages/resolve-departure';
+import { resolveExperienceDepartureConfig } from '@/lib/experience-booking';
 
 export const runtime = 'nodejs';
 
@@ -334,14 +334,14 @@ export async function POST(request: Request) {
   }
 
   // Crear reserva + jobs (mismo esquema que el webhook, flujo directo).
-  const packageId = intentData.packageId || intentData.experienceId;
-  const packageSlug = intentData.packageSlug || intentData.experienceSlug;
-  const packageTitle = intentData.packageTitle || intentData.experienceTitle || intentData.intentTitle;
-  const pkg = packageId ? await getPaqueteById(packageId).catch(() => null) : null;
-  const finalPackageTitle = packageTitle ?? pkg?.titulo ?? '';
+  const experienceId = intentData.experienceId || intentData.packageId;
+  const experienceSlug = intentData.experienceSlug || intentData.packageSlug;
+  const experienceTitle = intentData.experienceTitle || intentData.packageTitle || intentData.intentTitle;
+  const experience = experienceId ? await getExperienciaById(experienceId).catch(() => null) : null;
+  const finalExperienceTitle = experienceTitle ?? experience?.titulo ?? (experience as any)?.title ?? '';
   const date = String(intentData.date ?? 'sin-fecha');
   const people = Number(intentData.people ?? 0) || 0;
-  if (!packageId || !people || people < 1) {
+  if (!experienceId || !people || people < 1) {
     return NextResponse.json({ error: 'El intento no tiene datos válidos.' }, { status: 400 });
   }
   const currency = String(intentData.currency ?? 'ars');
@@ -357,7 +357,7 @@ export async function POST(request: Request) {
   }
   const customerPhone = payer?.phone?.number || intentData.customerPhone || '';
   const customerDocument = payer?.identification?.number || intentData.customerDocument || '';
-  const baseCapacity = pkg ? resolveDepartureConfig(pkg, date).baseCapacity : 0;
+  const baseCapacity = experience ? resolveExperienceDepartureConfig(experience, date).baseCapacity : 0;
   const from = getFromEmail(true);
   const replyTo = process.env.SUPPORT_EMAIL || getFromEmail(false);
   const now = Timestamp.now();
@@ -380,7 +380,7 @@ export async function POST(request: Request) {
   const lookupUrl = siteUrl ? `${siteUrl}/consultar-reserva?code=${encodeURIComponent(reservationCode)}` : undefined;
   const directEmailData = {
     customerName: customerName || '',
-    experienceTitle: finalPackageTitle || SITE_NAME,
+    experienceTitle: finalExperienceTitle || SITE_NAME,
     dateFormatted: formatDate(date),
     peopleLabel,
     amountFormatted: formatAmount(amountTotal || 0, currency),
@@ -430,25 +430,22 @@ export async function POST(request: Request) {
       let holdWasActive = false;
       let lockSnap: any = null;
       let lockRef: any = null;
-      if (holdId && packageId && date && date !== 'sin-fecha') {
+      if (holdId && experienceId && date && date !== 'sin-fecha') {
         const holdRef = doc(db, 'reservationHolds', holdId);
         const holdSnap = await tx.get(holdRef);
         if (holdSnap.exists()) {
           holdWasActive = String((holdSnap.data() as any)?.status ?? '') === 'active';
           if (holdWasActive) {
-            lockRef = doc(db, 'stockHolds', `${packageId}_${date}`);
+            lockRef = doc(db, 'stockHolds', `${experienceId}_${date}`);
             lockSnap = await tx.get(lockRef);
           }
         }
       }
 
       tx.set(reservaRef, {
-        packageId,
-        packageSlug,
-        packageTitle: finalPackageTitle,
-        experienceId: packageId,
-        experienceSlug: packageSlug,
-        experienceTitle: finalPackageTitle,
+        experienceId,
+        experienceSlug,
+        experienceTitle: finalExperienceTitle,
         date,
         people,
         peopleAdults: typeof intentData.peopleAdults === 'number' ? intentData.peopleAdults : null,
@@ -497,12 +494,11 @@ export async function POST(request: Request) {
         capacitySnapshot: {
           date,
           baseCapacity,
-          maxPeoplePerBooking: pkg ? resolveDepartureConfig(pkg, date).maxPeople : null,
-          hasSpecificDates: Boolean(pkg?.salidas?.length),
-          enabled: pkg ? resolveDepartureConfig(pkg, date).enabled : false,
+          maxPeoplePerBooking: experience ? resolveExperienceDepartureConfig(experience, date).maxPeople : null,
+          hasSpecificDates: Boolean(experience?.salidas?.length),
+          enabled: experience ? resolveExperienceDepartureConfig(experience, date).enabled : false,
         },
-        packageSnapshot: { id: packageId, slug: packageSlug, title: finalPackageTitle },
-        experienceSnapshot: { id: packageId, slug: packageSlug, title: finalPackageTitle },
+        experienceSnapshot: { id: experienceId, slug: experienceSlug, title: finalExperienceTitle },
         statusHistory: [
           {
             status: reservationStatus,
@@ -528,7 +524,7 @@ export async function POST(request: Request) {
 
       if (!stockSnap.exists() && date) {
         tx.set(stockRef, {
-          packageId,
+          experienceId,
           date,
           type: 'reserva',
           quantity: -people,
@@ -552,7 +548,7 @@ export async function POST(request: Request) {
             const heldPeople = Number((lockSnap.data() as any)?.heldPeople ?? 0);
             tx.update(lockRef, { heldPeople: Math.max(0, Math.floor(heldPeople - people)), updatedAt: now });
           } else {
-            tx.set(lockRef, { packageId, date, heldPeople: 0, createdAt: now, updatedAt: now });
+            tx.set(lockRef, { experienceId, date, heldPeople: 0, createdAt: now, updatedAt: now });
           }
         }
       }
@@ -564,7 +560,7 @@ export async function POST(request: Request) {
           to: customerEmail,
           from,
           replyTo,
-          subject: `Compra confirmada: ${finalPackageTitle || SITE_NAME}`,
+            subject: `Compra confirmada: ${finalExperienceTitle || SITE_NAME}`,
           html: htmlConfirm,
           text: textConfirm,
           attempts: confirmSendId ? 1 : 0,
@@ -585,7 +581,7 @@ export async function POST(request: Request) {
           to: customerEmail,
           from,
           replyTo,
-          subject: `Recordatorio de salida (48 hs): ${finalPackageTitle || SITE_NAME}`,
+            subject: `Recordatorio de salida (48 hs): ${finalExperienceTitle || SITE_NAME}`,
           html: htmlVoucher,
           text: textVoucher,
           attempts: voucherSendId ? 1 : 0,
@@ -606,7 +602,7 @@ export async function POST(request: Request) {
           to: CONTACT_INFO.email,
           from,
           replyTo,
-          subject: `Nueva reserva: ${finalPackageTitle || 'Paquete'} — ${customerName || customerEmail}`,
+            subject: `Nueva reserva: ${finalExperienceTitle || 'Experiencia'} — ${customerName || customerEmail}`,
           html: htmlAdmin,
           text: textAdmin,
           attempts: adminSendId ? 1 : 0,

@@ -15,17 +15,25 @@ import {
   X,
   Loader2,
   ChevronRight,
+  PlusCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import { SITE_NAME } from '@/lib/constants';
+import { useVendor } from '@/components/vendor/VendorContext';
 import { getBrandLogoSrc, isRemoteUrl, renderTemplate, siteConfig } from '@/lib/siteConfig';
 
 const navigation = [
-  { name: 'Dashboard', href: '/vendedor', icon: LayoutDashboard },
+  { name: 'Inicio', href: '/vendedor', icon: LayoutDashboard },
   { name: 'Reservas', href: '/vendedor/reservas', icon: CalendarCheck },
   { name: 'Enlaces', href: '/vendedor/enlaces', icon: Link2 },
 ];
+
+const SEGMENT_LABELS: Record<string, string> = {
+  vendedor: 'Inicio',
+  reservas: 'Reservas',
+  nueva: 'Nueva reserva',
+  enlaces: 'Enlaces',
+};
 
 export default function VendorLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -33,6 +41,7 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
+  const vendor = useVendor();
   const logoSrc = getBrandLogoSrc();
   const logoAlt = renderTemplate(siteConfig.branding.logo.altTextTemplate || '{{siteName}} Logo');
 
@@ -47,14 +56,15 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
     }
   };
 
-  const currentTitle = useMemo(() => {
-    const found = navigation.find((n) => {
-      if (n.href === '/vendedor') return pathname === n.href;
-      return pathname === n.href || pathname.startsWith(n.href + '/');
+  const crumbs = useMemo(() => {
+    const parts = pathname.split('/').filter(Boolean);
+    let acc = '';
+    return parts.map((seg, idx) => {
+      acc += `/${seg}`;
+      const isDynamic = idx > 1 && !SEGMENT_LABELS[seg];
+      return { href: acc, label: isDynamic ? 'Detalle' : SEGMENT_LABELS[seg] ?? seg };
     });
-    return found?.name ?? 'Vendedor';
   }, [pathname]);
-
   return (
     <div className={cn('min-h-screen bg-gray-50 vendor-scope')}>
       {sidebarOpen && (
@@ -120,7 +130,7 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
                   {isActive && (
                     <motion.span
                       layoutId="vendor-sidebar-rail"
-                      className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-full bg-[#E30613]"
+                      className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-full bg-cyan-400"
                       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                     />
                   )}
@@ -134,10 +144,9 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
           <div className="p-4 border-t border-white/10">
             {user && (
               <div className="mb-3 px-3 py-2 bg-white/5 rounded-lg">
-                <p className="text-sm text-gray-400">Conectado como:</p>
-                <p className="text-base font-medium text-white truncate">
-                  {user.email}
-                </p>
+                <p className="text-xs text-gray-400">Conectado como</p>
+                <p className="text-sm font-medium text-white truncate">{vendor.name || user.email}</p>
+                <p className="text-xs text-gray-400 truncate">{user.email}</p>
               </div>
             )}
             <Button
@@ -163,58 +172,39 @@ export default function VendorLayout({ children }: { children: React.ReactNode }
       </aside>
 
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
-          <div className="h-16 flex items-center justify-between px-6">
-            <button
-              className="lg:hidden"
-              onClick={() => setSidebarOpen(true)}
-            >
-              <Menu className="h-6 w-6" />
-            </button>
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-semibold text-gray-900">{currentTitle}</span>
-              <Button asChild variant="outline" size="sm">
+        <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur">
+          <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              <button className="rounded-md p-1.5 text-gray-600 hover:bg-gray-100 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="Abrir menú">
+                <Menu className="h-6 w-6" />
+              </button>
+              <nav aria-label="Breadcrumb" className="min-w-0">
+                <ol className="flex min-w-0 items-center gap-1.5 text-sm text-gray-500">
+                  {crumbs.map((c, idx) => (
+                    <li key={c.href} className="flex min-w-0 items-center gap-1.5">
+                      {idx > 0 && <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />}
+                      {idx === crumbs.length - 1 ? (
+                        <span className="truncate font-semibold text-gray-900">{c.label}</span>
+                      ) : (
+                        <Link href={c.href} className="truncate transition-colors hover:text-gray-700">
+                          {c.label}
+                        </Link>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </nav>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex">
                 <Link href="/" target="_blank">
                   Ver sitio
                 </Link>
               </Button>
             </div>
           </div>
-          {(() => {
-            const parts = pathname.split('/').filter(Boolean);
-            const isSub = parts.length > 1;
-            if (!isSub) return null;
-            const crumbs = parts.slice(0);
-            let hrefAcc = '';
-            return (
-              <nav className="px-6 pb-3">
-                <ol className="flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
-                  {crumbs.map((seg, idx) => {
-                    hrefAcc += `/${seg}`;
-                    const label = seg === 'vendedor'
-                      ? 'Vendedor'
-                      : seg.replace(/-/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
-                    const isLast = idx === crumbs.length - 1;
-                    return (
-                      <li key={`${seg}-${idx}`} className="flex items-center gap-1.5">
-                        {idx > 0 && <ChevronRight className="h-4 w-4 text-gray-300" />}
-                        {isLast ? (
-                          <span className="text-gray-700 font-medium">{label}</span>
-                        ) : (
-                          <Link href={hrefAcc} className="hover:text-gray-700 transition-colors">
-                            {label}
-                          </Link>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </nav>
-            );
-          })()}
         </header>
-
-        <main className="max-w-7xl mx-auto p-6">
+        <main className="mx-auto max-w-7xl p-4 sm:p-6">
           {children}
         </main>
       </div>

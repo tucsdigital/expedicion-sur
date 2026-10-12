@@ -2,7 +2,8 @@ import { collection, getDocs, query, orderBy as firestoreOrderBy, where, limit }
 import { db, firebaseEnabled } from '@/lib/firebase';
 import { serializeFirestoreData } from '@/lib/utils/serialize';
 import { BannerImage, BlogPost, Categoria, Paquete } from '@/types';
-import { getExperiencias } from '@/lib/experiencias';
+import { getExperiencias as getLegacyExperiencias } from '@/lib/experiencias';
+import { getExperiencias as getCatalogExperiencias } from '@/lib/experiencias-catalog';
 import { getHomeBackgroundImageFallbackUrl } from '@/lib/siteConfig';
 import { toSearchEntry, type SearchData } from '@/lib/search/home-search';
 
@@ -71,16 +72,18 @@ async function fetchActiveCategories(): Promise<Categoria[]> {
   }
 }
 
-/** Datos del buscador: destinos = categorías activas de Firestore; experiencias = todos los paquetes visibles. */
+/** Datos del buscador: destinos activos y experiencias visibles del catálogo. */
 async function getSearchData(): Promise<SearchData> {
-  const [categorias, paquetes] = await Promise.all([
+  const [categorias, experiencias] = await Promise.all([
     fetchActiveCategories(),
-    fetchVisibleOrdered<Paquete>('paquetes', SEARCH_PAQUETES_LIMIT),
+    getCatalogExperiencias(),
   ]);
   return {
     destinations: categorias.map((categoria) => ({ id: categoria.id, nombre: String(categoria.nombre ?? '') })),
-    entries: paquetes
-      .map((paquete) => toSearchEntry(paquete, categorias))
+    entries: experiencias
+      .filter((experience) => experience.visible !== false)
+      .slice(0, SEARCH_PAQUETES_LIMIT)
+      .map((experience) => toSearchEntry(experience, categorias))
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
   };
 }
@@ -109,11 +112,11 @@ export async function getHomeData() {
     categoriasDestacadas,
     searchData,
   ] = await Promise.all([
-    fetchVisibleOrdered<Paquete>('paquetes', HOME_PAQUETES_LIMIT),
+    getCatalogExperiencias().then((items) => items.filter((experience) => experience.visible !== false).slice(0, HOME_PAQUETES_LIMIT)),
     getDocs(query(collection(db, 'banners'), firestoreOrderBy('orden', 'asc'))),
     fetchVisibleOrdered<BlogPost>('blog', 4),
     getDocs(query(collection(db, 'secciones'), firestoreOrderBy('orden', 'asc'))),
-    getExperiencias({ visibleOnly: true, limit: HOME_EXPERIENCIAS_LIMIT }),
+    getLegacyExperiencias({ visibleOnly: true, limit: HOME_EXPERIENCIAS_LIMIT }),
     fetchFeaturedCategories(HOME_CATEGORIAS_LIMIT),
     getSearchData(),
   ]);

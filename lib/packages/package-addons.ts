@@ -44,7 +44,7 @@ export const packageAddonSchema = z.object({
 
 export const packageAddonsSchema = z
   .array(packageAddonSchema)
-  .max(MAX_PACKAGE_ADDONS, `Máximo ${MAX_PACKAGE_ADDONS} adicionales por excursión`)
+  .max(MAX_PACKAGE_ADDONS, `Máximo ${MAX_PACKAGE_ADDONS} adicionales por experiencia`)
   .optional()
   .default([]);
 

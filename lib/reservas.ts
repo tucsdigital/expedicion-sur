@@ -306,20 +306,21 @@ export async function getReservaPayments(reservationId: string, options: { limit
   return snapshot.docs.map((d) => serializeFirestoreData<ReservaPaymentEvent>({ id: d.id, ...d.data() }));
 }
 
-/** Conteo de personas reservadas por fecha para un paquete (solo status reserved/completed). Para cada date YYYY-MM-DD devuelve la suma de people. */
-export async function getReservasCountByPackageAndDate(
-  packageId: string
+/** Conteo de capacidad por experiencia, incluyendo ventas históricas con packageId. */
+export async function getReservasCountByExperienceAndDate(
+  experienceId: string
 ): Promise<Record<string, number>> {
-  // Count reservations that occupy capacity: both 'reserved' and 'completed'
-  const q = query(
-    collection(db, COLLECTION),
-    where('packageId', '==', packageId),
-    where('status', 'in', ['reserved', 'completed'])
-  );
-  const snapshot = await getDocs(q);
+  const [current, legacy] = await Promise.all([
+    getDocs(query(collection(db, COLLECTION), where('experienceId', '==', experienceId))).catch(() => null),
+    getDocs(query(collection(db, COLLECTION), where('packageId', '==', experienceId))).catch(() => null),
+  ]);
+  const documents = new Map<string, any>();
+  current?.docs.forEach((item) => documents.set(item.id, item));
+  legacy?.docs.forEach((item) => documents.set(item.id, item));
   const byDate: Record<string, number> = {};
-  snapshot.docs.forEach((d) => {
+  documents.forEach((d) => {
     const data = d.data();
+    if (data.status !== 'reserved' && data.status !== 'completed') return;
     const date = data.date as string;
     const people = typeof data.people === 'number' ? data.people : 0;
     if (date && date !== 'sin-fecha') {
@@ -329,5 +330,5 @@ export async function getReservasCountByPackageAndDate(
   return byDate;
 }
 
-// Alias para mantener compatibilidad durante la transición
-export const getReservasCountByExperienceAndDate = getReservasCountByPackageAndDate;
+/** Alias legacy para consumidores anteriores. */
+export const getReservasCountByPackageAndDate = getReservasCountByExperienceAndDate;

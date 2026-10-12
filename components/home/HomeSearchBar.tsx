@@ -133,7 +133,7 @@ export default function HomeSearchBar({ paquetes }: Props) {
                   }}
                   onFocus={() => setShowSuggestions(true)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Destino o excursión"
+                  placeholder="Destino o experiencia"
                   className="w-full bg-transparent outline-none text-sm font-medium text-gray-900 placeholder:text-gray-400"
                   role="combobox"
                   aria-expanded={showSuggestions}

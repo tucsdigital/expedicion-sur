@@ -70,7 +70,7 @@ export default function PaqueteCard({
       : paquete.destino || 'Expedicion Sur';
   const badgeTexto = badgeLabel
     ? badgeLabel
-    : humanizeExcursionType((Array.isArray(paquete.tipos) && paquete.tipos[0]) || paquete.tipo) || 'Excursión';
+    : humanizeExcursionType((Array.isArray(paquete.tipos) && paquete.tipos[0]) || paquete.tipo) || 'Experiencia';
   const imagenSrc =
     paquete.imagenTarjeta || paquete.imagenPrincipal || paquete.imagenCard || '/images/placeholder-package.jpg';
   const promoPrice = Number(paquete.precioDescuentoPrimerosCupos ?? 0);
@@ -91,7 +91,7 @@ export default function PaqueteCard({
       try {
         await navigator.share({
           title: paquete.titulo,
-          text: `Mirá esta excursión: ${paquete.titulo}`,
+          text: `Mirá esta experiencia: ${paquete.titulo}`,
           url,
         });
       } catch {
@@ -165,8 +165,8 @@ export default function PaqueteCard({
                 type="button"
                 onClick={handleShare}
                 className="rounded-full bg-white/95 p-2 text-[#0f172a] shadow-lg transition-transform hover:scale-110 hover:bg-white md:p-3"
-                title="Compartir excursión"
-                aria-label="Compartir excursión"
+                title="Compartir experiencia"
+                aria-label="Compartir experiencia"
               >
                 <Share2 className="h-4 w-4 md:h-5 md:w-5" />
               </button>

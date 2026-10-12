@@ -223,6 +223,9 @@ export interface Paquete {
   ctaWhatsApp: boolean;
 }
 
+/** Alias canónico del catálogo; Paquete queda solo para compatibilidad histórica. */
+export type ExperienciaCatalogo = Paquete;
+
 export type CartStatus = 'active' | 'checkout_started' | 'paid' | 'expired' | 'cancelled';
 export type CartCurrency = 'ars' | 'brl' | 'usd';
 
@@ -465,8 +468,11 @@ export interface Consulta {
   email: string;
   telefono: string;
   mensaje: string;
+  experiencia?: string;
+  experienceSlug?: string;
+  /** Solo lectura para consultas guardadas antes de la migración. */
   paquete?: string;
-  paqueteId?: string; // Slug del paquete para construir la URL
+  paqueteId?: string;
   ticketId?: string;
   cantidadPersonas?: number;
   ciudad?: string;

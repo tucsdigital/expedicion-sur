@@ -4,48 +4,46 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
-import { collection, getDocs, limit, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { ADMIN_EMAIL } from '@/lib/constants';
+import { VendorApiError, vendorFetch } from '@/lib/vendor-client';
+import { VendorContextProvider, type VendorProfile } from '@/components/vendor/VendorContext';
 
 export default function VendorProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const [profile, setProfile] = useState<VendorProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
-  const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace('/vendedor/login');
+      return;
+    }
+    if (user.email && user.email.toLowerCase() === ADMIN_EMAIL) {
+      router.replace('/admin');
+      return;
+    }
     let cancelled = false;
-
-    const check = async () => {
-      if (loading) return;
-      if (!user) {
-        router.replace('/vendedor/login');
-        if (!cancelled) setChecking(false);
-        return;
-      }
-      // Impedir acceso con cuenta admin
-      if (user.email && user.email.toLowerCase() === ADMIN_EMAIL) {
-        router.replace('/admin');
-        if (!cancelled) setChecking(false);
-        return;
-      }
+    (async () => {
+      setChecking(true);
       try {
-        const q = query(collection(db, 'vendors'), where('email', '==', user.email ?? ''), limit(1));
-        const snap = await getDocs(q);
-        const d0 = snap.docs[0];
+        const data = await vendorFetch<{ vendor: VendorProfile }>(user, '/api/vendor/me');
         if (cancelled) return;
-        if (d0 && (d0.data() as any).active) {
-          setAllowed(true);
-        } else {
-          setAllowed(false);
+        setProfile(data.vendor);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        if (e instanceof VendorApiError && (e.status === 401 || e.status === 403)) {
           router.replace('/vendedor/login');
+          return;
         }
+        setError(e instanceof Error ? e.message : 'No pudimos verificar tu acceso');
       } finally {
         if (!cancelled) setChecking(false);
       }
-    };
-    check();
+    })();
     return () => {
       cancelled = true;
     };
@@ -61,6 +59,18 @@ export default function VendorProtectedRoute({ children }: { children: React.Rea
       </div>
     );
   }
-  if (!allowed) return null;
-  return <>{children}</>;
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+        <div className="max-w-sm rounded-xl border border-rose-200 bg-white p-5 text-center shadow-sm">
+          <p className="text-sm font-medium text-rose-700">{error}</p>
+          <button className="mt-3 text-sm font-medium text-gray-700 underline" onClick={() => window.location.reload()}>
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (!profile) return null;
+  return <VendorContextProvider value={profile}>{children}</VendorContextProvider>;
 }

@@ -46,10 +46,44 @@ function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
+function mapExperienceData(id: string, raw: Record<string, any>): Experience {
+  const salidas = Array.isArray(raw.salidas) ? raw.salidas : [];
+  const bookingDates = Array.isArray(raw.bookingConfig?.dates) ? raw.bookingConfig.dates : [];
+  return serializeFirestoreData<Experience>({
+    ...raw,
+    id,
+    title: String(raw.title ?? raw.titulo ?? raw.name ?? ''),
+    subtitle: String(raw.subtitle ?? raw.descripcionCorta ?? raw.descripcion ?? ''),
+    supportText: String(raw.supportText ?? raw.descripcionCorta ?? raw.descripcion ?? ''),
+    topNoticeText: String(raw.topNoticeText ?? raw.etiqueta ?? ''),
+    videoOverlayText: String(raw.videoOverlayText ?? ''),
+    images: Array.isArray(raw.images) ? raw.images : Array.isArray(raw.imagenes) ? raw.imagenes : Array.isArray(raw.galeria) ? raw.galeria : [],
+    galleryIntro: String(raw.galleryIntro ?? raw.subtitulo ?? ''),
+    includes: Array.isArray(raw.includes) ? raw.includes : Array.isArray(raw.incluye) ? raw.incluye : [],
+    takeaways: Array.isArray(raw.takeaways) ? raw.takeaways : [],
+    forWho: Array.isArray(raw.forWho) ? raw.forWho : [],
+    notForWho: Array.isArray(raw.notForWho) ? raw.notForWho : [],
+    testimonials: Array.isArray(raw.testimonials) ? raw.testimonials : Array.isArray(raw.testimonios) ? raw.testimonios : [],
+    dividerPhrase: String(raw.dividerPhrase ?? ''),
+    calendarIntro: String(raw.calendarIntro ?? ''),
+    reservationMicrocopy: String(raw.reservationMicrocopy ?? ''),
+    faqs: Array.isArray(raw.faqs) ? raw.faqs : [],
+    availableDates: Array.isArray(raw.availableDates)
+      ? raw.availableDates
+      : salidas.map((item: any) => String(item.fecha ?? '')).filter(Boolean).length
+        ? salidas.map((item: any) => String(item.fecha ?? '')).filter(Boolean)
+        : bookingDates.map((item: any) => String(item.date ?? '')).filter(Boolean),
+    price: Number(raw.price ?? raw.precio ?? 0) || 0,
+    maxPeople: Number(raw.maxPeople ?? raw.capacidadMaxima ?? raw.bookingConfig?.maxPeoplePerBooking ?? 0) || undefined,
+    orden: Number(raw.orden ?? 0) || 0,
+    visible: raw.visible !== false,
+  });
+}
+
 function mapDocToExperience(docSnap: DocumentSnapshot): Experience | null {
   const data = docSnap.data();
   if (!data) return null;
-  return serializeFirestoreData<Experience>({ id: docSnap.id, ...data });
+  return mapExperienceData(docSnap.id, data as Record<string, any>);
 }
 
 /** Obtiene todas las experiencias (admin: todas; público: solo visibles ordenadas). Sin limit explícito, público usa 12 y admin sin límite. */
@@ -67,12 +101,12 @@ export async function getExperiencias(options: { visibleOnly?: boolean; limit?: 
         )
       : query(collection(db, COLLECTION), firestoreOrderBy('orden', 'asc'));
     const snapshot = await getDocs(baseQuery);
-    let list = snapshot.docs.map((d) => serializeFirestoreData<Experience>({ id: d.id, ...d.data() }));
+    let list = snapshot.docs.map((d) => mapExperienceData(d.id, d.data() as Record<string, any>));
     if (!visibleOnly && maxItems > 0) list = list.slice(0, maxItems);
     return list;
   } catch {
     const snapshot = await getDocs(collection(db, COLLECTION));
-    let list = snapshot.docs.map((d) => serializeFirestoreData<Experience>({ id: d.id, ...d.data() }));
+    let list = snapshot.docs.map((d) => mapExperienceData(d.id, d.data() as Record<string, any>));
     list = list.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
     if (visibleOnly) list = list.filter((e) => e.visible !== false);
     if (maxItems > 0) list = list.slice(0, maxItems);

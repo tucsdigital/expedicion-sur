@@ -1,132 +1,202 @@
 'use client';
 
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+import { ArrowRight, CalendarCheck, Link2, PlusCircle, TrendingUp, Wallet } from 'lucide-react';
 import VendorProtectedRoute from '@/components/vendor/VendorProtectedRoute';
 import VendorLayout from '@/components/vendor/VendorLayout';
-import { useEffect, useState } from 'react';
-import { collection, getDocs, orderBy, query, where, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { useVendor } from '@/components/vendor/VendorContext';
+import { EmptyState, ErrorState, LoadingBlock, PageHeader, Panel, PayoutPill, SourcePill, StatCard, StatusPill } from '@/components/vendor/parts';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
-import type { Reservation } from '@/components/landing-reserva/types';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2 } from 'lucide-react';
+import { formatDate, formatMoney, vendorFetch, type VendorDashboardData } from '@/lib/vendor-client';
 
-export default function VendorDashboardPage() {
+function Dashboard() {
   const { user } = useAuth();
+  const vendor = useVendor();
+  const [data, setData] = useState<VendorDashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [reservas, setReservas] = useState<Reservation[]>([]);
-  const [stats, setStats] = useState({ sales: 0, commissions: 0 });
 
-  useEffect(() => {
-    const load = async () => {
-      if (!user?.email) return;
-      setLoading(true);
-      try {
-        const vq = query(collection(db, 'vendors'), where('email', '==', user.email), limit(1));
-        const vs = await getDocs(vq);
-        const v = vs.docs[0];
-        if (!v) return;
-        const rq = query(collection(db, 'reservas'), where('referredBy.vendorId', '==', v.id), orderBy('createdAt', 'desc'), limit(20));
-        const rs = await getDocs(rq);
-        const list = rs.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Reservation[];
-        setReservas(list);
-        const sales = list.reduce((acc, r) => acc + (r.amountTotal || 0), 0);
-        const commissions = list.reduce((acc, r) => acc + (r.referredBy?.commissionAmount || 0), 0);
-        setStats({ sales, commissions });
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await vendorFetch<VendorDashboardData>(user, '/api/vendor/dashboard'));
+    } catch (e: any) {
+      setError(e.message || 'No pudimos cargar tu resumen');
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const currencies = data ? Object.keys(data.byCurrency).filter((c) => data.byCurrency[c].sales || data.byCurrency[c].commission) : [];
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={`Hola, ${vendor.name.split(' ')[0] || 'vendedor'}`}
+        description="Resumen de tus ventas y comisiones."
+        actions={
+          <>
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href="/vendedor/enlaces">
+                <Link2 className="h-4 w-4" /> Mis enlaces
+              </Link>
+            </Button>
+            <Button asChild size="sm" className="gap-1.5">
+              <Link href="/vendedor/reservas/nueva">
+                <PlusCircle className="h-4 w-4" /> Nueva reserva
+              </Link>
+            </Button>
+          </>
+        }
+      />
+
+      {error ? (
+        <ErrorState message={error} onRetry={load} />
+      ) : loading || !data ? (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 animate-pulse rounded-xl bg-gray-100" />
+            ))}
+          </div>
+          <Panel>
+            <LoadingBlock />
+          </Panel>
+        </>
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Ventas" value={data.totals.reservations} hint={`${data.totals.manual} manuales · ${data.totals.online} online`} icon={<CalendarCheck className="h-4 w-4" />} />
+            <StatCard label="Reservas activas" value={(data.byStatus.pending ?? 0) + (data.byStatus.reserved ?? 0)} hint={`${data.byStatus.completed ?? 0} completadas · ${data.byStatus.cancelled ?? 0} canceladas`} icon={<TrendingUp className="h-4 w-4" />} />
+            <StatCard label="Enlaces activos" value={`${data.links.active}/${data.links.total}`} hint="Códigos de referido" icon={<Link2 className="h-4 w-4" />} />
+            <StatCard
+              label="Comisión pendiente"
+              value={
+                currencies.length === 0
+                  ? '—'
+                  : currencies.map((c) => (
+                      <div key={c} className="text-xl">
+                        {formatMoney(data.byCurrency[c].pending + data.byCurrency[c].accrued, c)}
+                      </div>
+                    ))
+              }
+              hint="Pendiente + devengada"
+              icon={<Wallet className="h-4 w-4" />}
+            />
+          </div>
+
+          {currencies.length > 0 && (
+            <Panel title="Resumen por moneda">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead className="text-left text-xs uppercase tracking-wide text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">Moneda</th>
+                      <th className="px-4 py-2 font-medium">Ventas</th>
+                      <th className="px-4 py-2 font-medium">Comisión total</th>
+                      <th className="px-4 py-2 font-medium">Por cobrar</th>
+                      <th className="px-4 py-2 font-medium">Cobrada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currencies.map((c) => {
+                      const t = data.byCurrency[c];
+                      return (
+                        <tr key={c} className="border-t border-gray-100">
+                          <td className="px-4 py-3 font-medium uppercase">{c}</td>
+                          <td className="px-4 py-3">{formatMoney(t.sales, c)}</td>
+                          <td className="px-4 py-3">{formatMoney(t.commission, c)}</td>
+                          <td className="px-4 py-3">{formatMoney(t.pending + t.accrued, c)}</td>
+                          <td className="px-4 py-3 text-emerald-700">{formatMoney(t.paid, c)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          )}
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Panel
+              title="Últimas ventas"
+              className="lg:col-span-2"
+              action={
+                <Link href="/vendedor/reservas" className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900">
+                  Ver todas <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              }
+            >
+              {data.recent.length === 0 ? (
+                <EmptyState
+                  title="Todavía no tenés ventas"
+                  description="Compartí tus enlaces o cargá una reserva manual para empezar."
+                  action={
+                    <Button asChild size="sm">
+                      <Link href="/vendedor/reservas/nueva">Nueva reserva</Link>
+                    </Button>
+                  }
+                />
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {data.recent.map((r) => (
+                    <li key={r.id}>
+                      <Link href={`/vendedor/reservas/${r.id}`} className="flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-gray-900">{r.customerName || 'Sin nombre'}</p>
+                          <p className="truncate text-xs text-gray-500">
+                            {r.experienceTitle} · {formatDate(r.date)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                          <SourcePill source={r.source} />
+                          <StatusPill status={r.status} />
+                          <span className="text-sm font-semibold text-gray-900">{formatMoney(r.amountTotal, r.currency)}</span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+
+            <Panel title="Enlaces que más venden">
+              {data.topLinks.length === 0 ? (
+                <EmptyState title="Sin ventas por enlace" description="Cuando alguien compre desde tu enlace lo vas a ver acá." />
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {data.topLinks.map((l) => (
+                    <li key={l.code} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-medium text-gray-900">{l.code}</p>
+                        <p className="truncate text-xs text-gray-500">{l.title}</p>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">{l.count}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function VendorDashboardPage() {
   return (
     <VendorProtectedRoute>
       <VendorLayout>
-        <div className="space-y-6">
-          <h1 className="text-lg font-semibold text-gray-900">Resumen</h1>
-          {loading ? (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <Card key={`skel-card-${i}`} className="relative overflow-hidden rounded-xl border border-gray-200 bg-white">
-                    <CardHeader className="pb-2">
-                      <div className="h-4 w-32 bg-gray-200 rounded-md animate-pulse" />
-                    </CardHeader>
-                    <CardContent className="pb-6">
-                      <div className="h-8 w-24 bg-gray-200 rounded-md animate-pulse" />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-              <Card className="rounded-xl border border-gray-200 bg-white">
-                <CardHeader className="border-b border-gray-200">
-                  <div className="h-5 w-36 bg-gray-200 rounded-md animate-pulse" />
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="p-4">
-                    <div className="space-y-2">
-                      {Array.from({ length: 6 }).map((_, i) => (
-                        <div key={`row-skel-${i}`} className="grid grid-cols-5 gap-3">
-                          {Array.from({ length: 5 }).map((__, j) => (
-                            <div key={`cell-${i}-${j}`} className="h-4 bg-gray-200 rounded animate-pulse" />
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          ) : (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Ventas referidas</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-2xl font-semibold">{(stats.sales/100).toLocaleString()}</CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Comisiones</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-2xl font-semibold">{(stats.commissions/100).toLocaleString()}</CardContent>
-                </Card>
-              </div>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Últimas reservas</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-lg border border-gray-200 overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-600">
-                        <tr>
-                          <th className="px-4 py-3 text-left font-medium">Fecha</th>
-                          <th className="px-4 py-3 text-left font-medium">Paquete</th>
-                          <th className="px-4 py-3 text-left font-medium">Cliente</th>
-                          <th className="px-4 py-3 text-left font-medium">Venta</th>
-                          <th className="px-4 py-3 text-left font-medium">Comisión</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reservas.map(r => (
-                          <tr key={r.id} className="border-t border-gray-100">
-                            <td className="px-4 py-3">{new Date((r.createdAt as any)?.seconds ? (r.createdAt as any).seconds * 1000 : Date.now()).toLocaleDateString()}</td>
-                            <td className="px-4 py-3">{r.experienceTitle}</td>
-                            <td className="px-4 py-3">{r.customerName}</td>
-                            <td className="px-4 py-3">{(r.amountTotal/100).toLocaleString()} {r.currency?.toUpperCase?.()}</td>
-                            <td className="px-4 py-3">{r.referredBy ? (r.referredBy.commissionAmount/100).toLocaleString() : '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          )}
-        </div>
+        <Dashboard />
       </VendorLayout>
     </VendorProtectedRoute>
   );

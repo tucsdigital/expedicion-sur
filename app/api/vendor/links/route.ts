@@ -6,7 +6,7 @@ import { REFERRAL_LINKS_COLLECTION, RESERVATIONS_COLLECTION } from '@/lib/vendor
 
 export const runtime = 'nodejs';
 
-const EXPERIENCES = 'experiencias';
+const PACKAGES = 'paquetes';
 type Ccy = 'ars' | 'brl' | 'usd';
 
 const idSchema = z.object({ linkId: z.string().min(1) });
@@ -33,15 +33,10 @@ function allowedList(vendor: Record<string, any>): string[] | null {
 }
 
 async function loadExperiences(db: FirebaseFirestore.Firestore, vendor: Record<string, any>) {
-  const [current, legacy] = await Promise.all([
-    db.collection(EXPERIENCES).where('visible', '==', true).get(),
-    db.collection('paquetes').where('visible', '==', true).get().catch(() => null),
-  ]);
-  const byId = new Map<string, any>();
-  legacy?.docs.forEach((d) => byId.set(d.id, { id: d.id, ...(d.data() as any) }));
-  current.docs.forEach((d) => byId.set(d.id, { id: d.id, ...(d.data() as any) }));
+  const snapshot = await db.collection(PACKAGES).where('visible', '==', true).get();
   const allowed = allowedList(vendor);
-  return Array.from(byId.values())
+  return snapshot.docs
+    .map((d) => ({ id: d.id, ...(d.data() as any) }))
     .map((data) => ({ id: String(data.id), title: String(data.titulo ?? data.title ?? ''), slug: String(data.slug ?? '') }))
     .filter((p) => p.title && p.slug && (!allowed || allowed.includes(p.id)))
     .sort((a, b) => a.title.localeCompare(b.title, 'es'));
@@ -90,16 +85,14 @@ async function snapshot(db: FirebaseFirestore.Firestore, vendorId: string, vendo
   // Experiencias no visibles o ya no habilitadas se conservan en el historial de enlaces.
   const linksRaw = await db.collection(REFERRAL_LINKS_COLLECTION).where('vendorId', '==', vendorId).get();
   for (const d of linksRaw.docs) {
-    const id = String((d.data() as any).experienceId ?? '');
-    if (id && !all.has(id)) {
-       const experience = await db.collection(EXPERIENCES).doc(id).get();
-       const legacy = experience.exists ? null : await db.collection('paquetes').doc(id).get().catch(() => null);
-       const doc = experience.exists ? experience : legacy;
-       if (doc?.exists) {
-         const data = doc.data() as any;
-         all.set(id, { title: String(data.titulo ?? data.title ?? ''), slug: String(data.slug ?? '') });
+      const id = String((d.data() as any).experienceId ?? '');
+      if (id && !all.has(id)) {
+        const paquete = await db.collection(PACKAGES).doc(id).get();
+        if (paquete.exists) {
+          const data = paquete.data() as any;
+          all.set(id, { title: String(data.titulo ?? data.title ?? ''), slug: String(data.slug ?? '') });
+        }
       }
-    }
   }
   const links = await loadLinks(db, vendorId, all);
   return { vendorId, experiencias, links };
@@ -128,9 +121,7 @@ export async function POST(request: Request) {
     const allowed = allowedList(vendor);
     if (allowed && !allowed.includes(experienceId)) return fail('No tenés permiso para esa experiencia.', 403);
 
-    const current = await db.collection(EXPERIENCES).doc(experienceId).get();
-    const legacy = current.exists ? null : await db.collection('paquetes').doc(experienceId).get().catch(() => null);
-    const experience = current.exists ? current : legacy;
+    const experience = await db.collection(PACKAGES).doc(experienceId).get();
     const experienceData = experience?.data() as any;
     if (!experience?.exists || experienceData?.visible !== true) return fail('La experiencia no está disponible.', 404);
 

@@ -71,7 +71,7 @@ export default function AdminDashboard() {
           reservas,
         ] = await Promise.all([
           getDocs(collection(db, 'categorias')),
-          getDocs(collection(db, 'experiencias')),
+          getDocs(collection(db, 'paquetes')),
           getDocs(query(collection(db, 'consultas'), where('leida', '==', false))),
           getDocs(collection(db, 'newsletter')),
           getReservas({ limit: RESERVAS_LIMIT }),

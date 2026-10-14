@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { collection, getDocs, deleteDoc, doc, orderBy, query, getDoc } from 'firebase/firestore';
-import { db, getAuthInstance } from '@/lib/firebase';
+import { collection, getDocs, deleteDoc, doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { Paquete } from '@/types';
 import { deleteBlobByKey, getBlobKeyFromUrl } from '@/lib/utils/blob';
 import { duplicatePaquete } from '@/lib/duplicatePaquete';
@@ -14,7 +14,7 @@ import AdminLayout from '@/components/admin/AdminLayout';
 import AdminPagination from '@/components/admin/AdminPagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Loader2, Search, X, User, Users, Sparkles, Globe2, GraduationCap, CheckCircle2, XCircle, Star, Music, Database } from 'lucide-react';
+import { Plus, Loader2, Search, X, User, Users, Sparkles, Globe2, GraduationCap, CheckCircle2, XCircle, Star, Music } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -88,7 +88,6 @@ export default function PaquetesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [duplicateId, setDuplicateId] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState(false);
-  const [migratingCatalog, setMigratingCatalog] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
@@ -106,64 +105,18 @@ export default function PaquetesPage() {
   const fetchPaquetes = async () => {
     try {
       const [snapshot, categorias] = await Promise.all([
-        getDocs(query(collection(db, 'experiencias'), orderBy('orden', 'asc'))),
+        getDocs(collection(db, 'paquetes')),
         fetchActiveCategorias(),
       ]);
       const data = snapshot.docs.map((doc) =>
         normalizeExperienciaCatalogo({ id: doc.id, ...doc.data() } as Paquete, categorias)
-      );
+      ).sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
       setPaquetes(data);
     } catch (error) {
       console.error('Error cargando experiencias:', error);
       toast.error('Error al cargar experiencias');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const migrateLegacyCatalog = async () => {
-    const user = getAuthInstance().currentUser;
-    if (!user) {
-      toast.error('Iniciá sesión para migrar el catálogo.');
-      return;
-    }
-    setMigratingCatalog(true);
-    try {
-      const token = await user.getIdToken();
-      const headers = { Authorization: `Bearer ${token}` };
-      const previewResponse = await fetch('/api/admin/experiencias/migracion', { headers, cache: 'no-store' });
-      const preview = await previewResponse.json().catch(() => null);
-      if (!previewResponse.ok) throw new Error(preview?.error || 'No se pudo revisar el catálogo anterior.');
-      if (!preview.documentsToCopy) {
-        toast.info(preview.existingIdsSkipped
-          ? `No hay documentos nuevos para copiar; ${preview.existingIdsSkipped} IDs ya existen y no se modificaron.`
-          : 'No hay experiencias anteriores para copiar.');
-        return;
-      }
-      const conflicts = Number(preview.existingIdsSkipped) || 0;
-      const conflictList = Array.isArray(preview.conflictIds) && preview.conflictIds.length
-        ? ` IDs en conflicto: ${preview.conflictIds.slice(0, 8).join(', ')}${preview.conflictIdsTruncated ? '…' : ''}.`
-        : '';
-      const message = `Se copiarán ${preview.documentsToCopy} experiencias, conservando sus IDs y sin borrar el catálogo anterior. ${conflicts} IDs existentes se omitirán sin sobrescribir.${conflictList} ¿Continuar?`;
-      if (!window.confirm(message)) return;
-
-      const response = await fetch('/api/admin/experiencias/migracion', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true }),
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.error || 'No se pudo copiar el catálogo anterior.');
-      if (result.skippedExisting > 0) {
-        toast.warning(`${result.copied} experiencias copiadas. ${result.skippedExisting} IDs existentes se dejaron intactos; revisá los conflictos antes de asignarlos a ventas.`);
-      } else {
-        toast.success(`${result.copied} experiencias copiadas; no hubo conflictos.`);
-      }
-      await fetchPaquetes();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudo completar la migración.');
-    } finally {
-      setMigratingCatalog(false);
     }
   };
 
@@ -175,7 +128,7 @@ export default function PaquetesPage() {
     if (!deleteId) return;
 
     try {
-      const paqueteDoc = await getDoc(doc(db, 'experiencias', deleteId));
+      const paqueteDoc = await getDoc(doc(db, 'paquetes', deleteId));
       if (paqueteDoc.exists()) {
         const paqueteData = paqueteDoc.data() as Paquete;
         const keysToDelete = new Set<string>();
@@ -218,7 +171,7 @@ export default function PaquetesPage() {
         }
       }
 
-      await deleteDoc(doc(db, 'experiencias', deleteId));
+      await deleteDoc(doc(db, 'paquetes', deleteId));
       toast.success('Experiencia eliminada correctamente');
       fetchPaquetes();
     } catch (error) {
@@ -334,10 +287,6 @@ export default function PaquetesPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={migrateLegacyCatalog} disabled={migratingCatalog}>
-                {migratingCatalog ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
-                Importar catálogo anterior
-              </Button>
               <Button asChild className="bg-black hover:bg-gray-800 text-white">
                 <Link href="/admin/experiencias/nuevo">
                   <Plus className="mr-2 h-4 w-4" />
@@ -371,7 +320,7 @@ export default function PaquetesPage() {
 
           <DragDropTable
             items={paquetesPaginados}
-            collectionName="experiencias"
+            collectionName="paquetes"
             viewPath="/experiencia"
             columns={[
               {

@@ -17,7 +17,7 @@ import { assertFirebaseEnabled, db, firebaseEnabled } from '@/lib/firebase';
 import { serializeFirestoreData } from '@/lib/utils/serialize';
 import type { Experience, BookingPublicData } from '@/components/landing-reserva/types';
 
-const COLLECTION = 'experiencias';
+const COLLECTION = 'paquetes';
 
 /** Límite por defecto para listados (evita traer más docs de los necesarios) */
 const DEFAULT_LIST_LIMIT = 12;

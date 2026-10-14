@@ -8,14 +8,9 @@ export async function GET(request: Request) {
   const ctx = await guardVendor(request);
   if (ctx instanceof NextResponse) return ctx;
   try {
-    const [current, legacy] = await Promise.all([
-      ctx.db.collection('experiencias').where('visible', '==', true).get(),
-      ctx.db.collection('paquetes').where('visible', '==', true).get().catch(() => null),
-    ]);
-    const byId = new Map<string, any>();
-    legacy?.docs.forEach((d) => byId.set(d.id, { id: d.id, ...(d.data() as any) }));
-    current.docs.forEach((d) => byId.set(d.id, { id: d.id, ...(d.data() as any) }));
-    const experiencias = Array.from(byId.values())
+    const snapshot = await ctx.db.collection('paquetes').where('visible', '==', true).get();
+    const experiencias = snapshot.docs
+      .map((d) => ({ id: d.id, ...(d.data() as any) }))
       .filter((item: any) => (item.titulo || item.title) && item.slug && (!ctx.allowedExperiences || ctx.allowedExperiences.includes(item.id)))
       .map((item: any) => toJson({
         ...item,

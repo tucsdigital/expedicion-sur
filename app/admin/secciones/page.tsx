@@ -142,7 +142,7 @@ export default function SeccionesPage() {
         setLoading(true);
         const [categoriasSnap, paquetesSnap, paquetesF1Snap, seccionesSnap] = await Promise.all([
           getDocs(collection(db, 'categorias')),
-          getDocs(query(collection(db, 'experiencias'), firestoreOrderBy('orden', 'asc'))),
+          getDocs(collection(db, 'paquetes')),
           getDocs(query(collection(db, 'paquetes_f1'), firestoreOrderBy('orden', 'asc'))),
           getDocs(query(collection(db, 'secciones'), firestoreOrderBy('orden', 'asc'))),
         ]);
@@ -151,17 +151,19 @@ export default function SeccionesPage() {
         const categoriasMap = new Map(categorias.map((cat) => [cat.id, cat.nombre]));
 
         const paquetesMap = new Map(
-          paquetesSnap.docs.map((doc) => [
-            doc.id,
-            {
-              id: doc.id,
-              titulo: doc.data().titulo as string,
-              categoriaId: doc.data().categoriaId as string | undefined,
-              etiqueta: doc.data().etiqueta as string | undefined,
-              fechaCreacion: doc.data().fechaCreacion?.toDate?.(),
-              orden: doc.data().orden as number | undefined,
-            },
-          ])
+          paquetesSnap.docs
+            .map((doc) => [
+              doc.id,
+              {
+                id: doc.id,
+                titulo: doc.data().titulo as string,
+                categoriaId: doc.data().categoriaId as string | undefined,
+                etiqueta: doc.data().etiqueta as string | undefined,
+                fechaCreacion: doc.data().fechaCreacion?.toDate?.(),
+                orden: doc.data().orden as number | undefined,
+              },
+            ] as const)
+            .sort((a, b) => (a[1].orden ?? 0) - (b[1].orden ?? 0))
         );
 
         const paquetesF1Map = new Map(

@@ -78,7 +78,7 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
         setDestacadosCount(destacadosOtros);
 
         // Cargar paquete
-        const docRef = doc(db, 'experiencias', id);
+        const docRef = doc(db, 'paquetes', id);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
@@ -364,7 +364,7 @@ export default function EditarPaquetePage({ params }: { params: Promise<{ id: st
         if (prevKey && !finalAddonKeySet.has(prevKey)) keysToDelete.add(prevKey);
       });
 
-      await updateDoc(doc(db, 'experiencias', id), sanitizedData);
+      await updateDoc(doc(db, 'paquetes', id), sanitizedData);
       const slugNew = slugify(data.titulo);
       await revalidateFrontPaths(['/experiencias', `/experiencia/${slugNew}`]);
 

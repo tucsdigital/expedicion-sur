@@ -147,7 +147,7 @@ export default function NuevoPaquetePage() {
         nuevoOrden = selectedDestacadoPosition;
         
         // Actualizar órdenes de paquetes destacados existentes
-        const paquetesSnapshot = await getDocs(collection(db, 'experiencias'));
+        const paquetesSnapshot = await getDocs(collection(db, 'paquetes'));
         const paquetesData = paquetesSnapshot.docs
           .map((doc) => ({
             id: doc.id,
@@ -159,7 +159,7 @@ export default function NuevoPaquetePage() {
         
         paquetesData.forEach((paquete) => {
           if (paquete.orden >= nuevoOrden) {
-            batch.update(doc(db, 'experiencias', paquete.id), {
+            batch.update(doc(db, 'paquetes', paquete.id), {
               orden: paquete.orden + 1
             });
           }
@@ -168,7 +168,7 @@ export default function NuevoPaquetePage() {
         await batch.commit();
       } else {
         // Orden por defecto (al final)
-        const paquetesSnapshot = await getDocs(collection(db, 'experiencias'));
+        const paquetesSnapshot = await getDocs(collection(db, 'paquetes'));
         const maxOrden = paquetesSnapshot.docs.length > 0 
           ? Math.max(...paquetesSnapshot.docs.map(doc => (doc.data().orden || 0))) 
           : 0;
@@ -229,7 +229,7 @@ export default function NuevoPaquetePage() {
         toast.success('Imágenes de adicionales listas', { id: 'upload-addons' });
       }
 
-      await addDoc(collection(db, 'experiencias'), sanitizedData);
+      await addDoc(collection(db, 'paquetes'), sanitizedData);
       await revalidateFrontPaths(['/experiencias', `/experiencia/${slug}`]);
 
       toast.success('✅ Experiencia creada correctamente', {

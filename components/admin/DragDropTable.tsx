@@ -65,7 +65,7 @@ type SortState = {
 
 interface DragDropTableProps<T extends { id: string }> {
   items: T[];
-  collectionName: 'categorias' | 'paquetes' | 'paquetes_f1' | 'blog' | 'experiencias';
+  collectionName: 'categorias' | 'paquetes' | 'paquetes_f1' | 'blog';
   columns: TableColumn<T>[];
   onItemsChange: (items: T[]) => void;
   onDelete: (id: string) => void;

@@ -15,7 +15,7 @@ export async function fetchActiveCategorias(): Promise<Categoria[]> {
 }
 
 export async function countFeaturedPackages(excludeId?: string): Promise<number> {
-  const paquetesQuery = query(collection(db, 'experiencias'), where('destacado', '==', true));
+  const paquetesQuery = query(collection(db, 'paquetes'), where('destacado', '==', true));
   const paquetesSnapshot = await getDocs(paquetesQuery);
   if (!excludeId) return paquetesSnapshot.size;
   return paquetesSnapshot.docs.filter((doc) => doc.id !== excludeId).length;
@@ -24,7 +24,7 @@ export async function countFeaturedPackages(excludeId?: string): Promise<number>
 export async function fetchExcursionTypes(): Promise<ExcursionTypeOption[]> {
   const [typesSnapshot, packagesSnapshot] = await Promise.all([
     getDocs(query(collection(db, 'excursionTypes'), orderBy('label', 'asc'))),
-    getDocs(collection(db, 'experiencias')),
+    getDocs(collection(db, 'paquetes')),
   ]);
   return mergeExcursionTypeOptions(
     mapExcursionTypesSnapshot(typesSnapshot),
@@ -107,7 +107,7 @@ export function subscribeExcursionTypes(
   );
 
   const unsubscribePackages = onSnapshot(
-    collection(db, 'experiencias'),
+    collection(db, 'paquetes'),
     (snapshot) => {
       currentPackageTypes = mapPackageTypesSnapshot(snapshot);
       emit();

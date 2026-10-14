@@ -20,7 +20,7 @@ import type { Reservation, Experience } from '@/components/landing-reserva/types
 const VENDORS = 'vendors';
 const REF_LINKS = 'referralLinks';
 const RESERVATIONS = 'reservas';
-const EXPERIENCES = 'experiencias';
+const PACKAGES = 'paquetes';
 
 export async function getVendors(options: { activeOnly?: boolean; limit?: number } = {}): Promise<Vendor[]> {
   const constraints: any[] = [];
@@ -117,7 +117,7 @@ export async function getReferralLinksByVendor(vendorId: string): Promise<Referr
       let experienceName = 'Todas';
       let experienceSlug: string | undefined = undefined;
       if (link.experienceId) {
-        const expDoc = await getDoc(doc(db, EXPERIENCES, link.experienceId));
+        const expDoc = await getDoc(doc(db, PACKAGES, link.experienceId));
         if (expDoc.exists()) {
           const exp = serializeFirestoreData<Experience>({ id: expDoc.id, ...expDoc.data() });
           experienceName = (exp as any).title ?? (exp as any).name ?? '';

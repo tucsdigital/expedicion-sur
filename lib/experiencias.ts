@@ -8,7 +8,6 @@ import {
   deleteDoc,
   query,
   where,
-  orderBy as firestoreOrderBy,
   limit as firestoreLimit,
   Timestamp,
   type DocumentSnapshot,
@@ -17,7 +16,7 @@ import { assertFirebaseEnabled, db, firebaseEnabled } from '@/lib/firebase';
 import { serializeFirestoreData } from '@/lib/utils/serialize';
 import type { Experience, BookingPublicData } from '@/components/landing-reserva/types';
 
-const COLLECTION = 'experiencias';
+const COLLECTION = 'paquetes';
 
 /** Límite por defecto para listados (evita traer más docs de los necesarios) */
 const DEFAULT_LIST_LIMIT = 12;
@@ -91,27 +90,15 @@ export async function getExperiencias(options: { visibleOnly?: boolean; limit?: 
   if (!firebaseEnabled) return [];
   const { visibleOnly = false, limit: limitOption } = options;
   const maxItems = limitOption !== undefined ? limitOption : (visibleOnly ? DEFAULT_LIST_LIMIT : 0);
-  try {
-    const baseQuery = visibleOnly
-      ? query(
-          collection(db, COLLECTION),
-          where('visible', '==', true),
-          firestoreOrderBy('orden', 'asc'),
-          ...(maxItems > 0 ? [firestoreLimit(maxItems)] : [])
-        )
-      : query(collection(db, COLLECTION), firestoreOrderBy('orden', 'asc'));
-    const snapshot = await getDocs(baseQuery);
-    let list = snapshot.docs.map((d) => mapExperienceData(d.id, d.data() as Record<string, any>));
-    if (!visibleOnly && maxItems > 0) list = list.slice(0, maxItems);
-    return list;
-  } catch {
-    const snapshot = await getDocs(collection(db, COLLECTION));
-    let list = snapshot.docs.map((d) => mapExperienceData(d.id, d.data() as Record<string, any>));
-    list = list.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
-    if (visibleOnly) list = list.filter((e) => e.visible !== false);
-    if (maxItems > 0) list = list.slice(0, maxItems);
-    return list;
-  }
+  const baseQuery = visibleOnly
+    ? query(collection(db, COLLECTION), where('visible', '==', true))
+    : collection(db, COLLECTION);
+  const snapshot = await getDocs(baseQuery);
+  let list = snapshot.docs.map((d) => mapExperienceData(d.id, d.data() as Record<string, any>));
+  if (visibleOnly) list = list.filter((e) => e.visible !== false);
+  list.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  if (maxItems > 0) list = list.slice(0, maxItems);
+  return list;
 }
 
 /** Obtiene una experiencia por slug (para la página pública /experiencias/[slug]) */

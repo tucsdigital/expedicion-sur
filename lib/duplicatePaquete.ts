@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, orderBy, query, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { slugify } from '@/lib/utils/slugify';
 import { uploadImage, type UploadResult } from '@/lib/utils/upload';
@@ -133,7 +133,7 @@ function removeUndefinedFields(input: PackageDocumentInput): PackageDocumentInpu
 }
 
 export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqueteResult> {
-  const paqueteRef = doc(db, 'experiencias', paqueteId);
+  const paqueteRef = doc(db, 'paquetes', paqueteId);
   const paqueteSnapshot = await getDoc(paqueteRef);
 
   if (!paqueteSnapshot.exists()) {
@@ -141,7 +141,7 @@ export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqu
   }
 
   const original = paqueteSnapshot.data() as Paquete;
-  const paquetesSnapshot = await getDocs(query(collection(db, 'experiencias'), orderBy('orden', 'asc')));
+  const paquetesSnapshot = await getDocs(collection(db, 'paquetes'));
   const paquetesExistentes = paquetesSnapshot.docs.map((item) => ({
     id: item.id,
     ...item.data(),
@@ -214,7 +214,7 @@ export async function duplicatePaquete(paqueteId: string): Promise<DuplicatePaqu
   };
 
   const sanitizedDuplicatedData = removeUndefinedFields(duplicatedData) as Omit<Paquete, 'id'>;
-  const createdDoc = await addDoc(collection(db, 'experiencias'), sanitizedDuplicatedData);
+  const createdDoc = await addDoc(collection(db, 'paquetes'), sanitizedDuplicatedData);
 
   return {
     id: createdDoc.id,

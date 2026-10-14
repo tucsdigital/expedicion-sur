@@ -78,10 +78,8 @@ export async function GET(request: Request) {
       const titles = new Map<string, string>();
       await Promise.all(
         pkgIds.map(async (id) => {
-          const experience = await db.collection('experiencias').doc(id).get();
-          const legacy = experience.exists ? null : await db.collection('paquetes').doc(id).get().catch(() => null);
-          const doc = experience.exists ? experience : legacy;
-          if (doc?.exists) titles.set(id, String((doc.data() as any).titulo ?? (doc.data() as any).title ?? ''));
+          const paquete = await db.collection('paquetes').doc(id).get();
+          if (paquete.exists) titles.set(id, String((paquete.data() as any).titulo ?? (paquete.data() as any).title ?? ''));
         })
       );
       const links = snap.docs

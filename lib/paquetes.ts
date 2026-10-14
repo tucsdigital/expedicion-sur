@@ -12,10 +12,8 @@ import {
   orderBy,
   Timestamp,
   updateDoc,
-  setDoc,
   deleteDoc,
   addDoc,
-  limit as firestoreLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { serializeFirestoreData } from '@/lib/utils/serialize';
@@ -23,8 +21,7 @@ import type { Categoria, Paquete, Salida } from '@/types';
 import { getOperationalSalidas, resolveDepartureConfig } from '@/lib/packages/resolve-departure';
 import { packageHasCategory, syncPackageCategoryData } from '@/lib/packages/category-utils';
 
-const COLLECTION = 'experiencias';
-const LEGACY_COLLECTION = 'paquetes';
+const COLLECTION = 'paquetes';
 const CATEGORIAS_COLLECTION = 'categorias';
 
 async function fetchActiveCategoriasInternal(): Promise<Categoria[]> {
@@ -86,16 +83,10 @@ function normalizeFetchedPackage(paquete: Paquete, categorias: Categoria[]): Paq
 export const normalizeExperienciaCatalogo = normalizeFetchedPackage;
 
 async function loadCatalogDocuments(visibleOnly: boolean): Promise<Array<{ id: string; data: Record<string, any> }>> {
-  const [experiencesSnapshot, legacySnapshot] = await Promise.all([
-    getDocs(collection(db, COLLECTION)),
-    getDocs(collection(db, LEGACY_COLLECTION)).catch(() => null),
-  ]);
-  const byId = new Map<string, { id: string; data: Record<string, any> }>();
-  legacySnapshot?.docs.forEach((item) => byId.set(item.id, { id: item.id, data: item.data() as Record<string, any> }));
-  // The canonical experience document wins on duplicate IDs; legacy documents
-  // remain untouched in Firestore and are used only as a read fallback.
-  experiencesSnapshot.docs.forEach((item) => byId.set(item.id, { id: item.id, data: item.data() as Record<string, any> }));
-  const rows = Array.from(byId.values()).filter((item) => !visibleOnly || item.data.visible !== false);
+  const snapshot = await getDocs(collection(db, COLLECTION));
+  const rows = snapshot.docs
+    .map((item) => ({ id: item.id, data: item.data() as Record<string, any> }))
+    .filter((item) => !visibleOnly || item.data.visible !== false);
   return rows.sort((a, b) => (Number(a.data.orden ?? 0) - Number(b.data.orden ?? 0)) || String(a.data.titulo ?? a.data.title ?? '').localeCompare(String(b.data.titulo ?? b.data.title ?? ''), 'es'));
 }
 
@@ -147,15 +138,11 @@ export async function getPaquetesDestacados(maxItems = 6): Promise<Paquete[]> {
 
 /** Obtener paquete por ID */
 export async function getPaqueteById(id: string): Promise<Paquete | null> {
-  const experienceRef = doc(db, COLLECTION, id);
-  const legacyRef = doc(db, LEGACY_COLLECTION, id);
-  const [experienceSnap, legacySnap, categorias] = await Promise.all([
-    getDoc(experienceRef),
-    getDoc(legacyRef).catch(() => null),
+  const [snap, categorias] = await Promise.all([
+    getDoc(doc(db, COLLECTION, id)),
     fetchActiveCategoriasInternal(),
   ]);
-  const snap = experienceSnap.exists() ? experienceSnap : legacySnap;
-  if (!snap?.exists()) return null;
+  if (!snap.exists()) return null;
   return normalizeFetchedPackage(serializeFirestoreData<Paquete>({ id: snap.id, ...snap.data() }), categorias);
 }
 

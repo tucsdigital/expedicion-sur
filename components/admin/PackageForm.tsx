@@ -564,7 +564,7 @@ export default function PackageForm(props: Props) {
               mode === 'create' ? (
                 titulo && titulo.length >= 5 ? (
                   <DragDropOrderManager
-                    collectionName="experiencias"
+                    collectionName="paquetes"
                     currentId={undefined}
                     newItemName={titulo}
                     onPositionChange={onSelectedDestacadoPositionChange}
@@ -578,7 +578,7 @@ export default function PackageForm(props: Props) {
                   </div>
                 )
               ) : (
-                <DragDropOrderManager collectionName="experiencias" currentId={currentId} maxItems={9} onlyDestacados />
+                <DragDropOrderManager collectionName="paquetes" currentId={currentId} maxItems={9} onlyDestacados />
               )
             ) : (
               <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">

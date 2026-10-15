@@ -75,6 +75,13 @@ export type ReservationPricingSnapshot = {
   amountTotal: number;
   baseSubtotalAmount?: number | null;
   extrasTotalAmount?: number | null;
+  categoryPriceBreakdown?: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }> | null;
   currency: string;
   paymentMethod: ReservationPaymentMethod;
 };
@@ -170,12 +177,20 @@ export type Reservation = {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
+  peopleBreakdown?: Record<string, number> | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   /** Monto total pagado en centavos */
   amountTotal: number;
   currency: string;
   paymentMethod: ReservationPaymentMethod;
-  pricingMode?: 'fixed' | 'percent' | null;
+  pricingMode?: 'fixed' | 'percent' | 'category' | null;
+  categoryPriceBreakdown?: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }> | null;
   pricingBaseUnitAmount?: number | null;
   unitAmountAdults?: number | null;
   unitAmountMinors?: number | null;

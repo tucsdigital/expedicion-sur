@@ -143,14 +143,19 @@ export default async function CheckoutPage({
     people: safePeople,
     peopleAdults: typeof pax.adults === 'number' ? pax.adults : null,
     peopleMinors: typeof pax.minors === 'number' ? pax.minors : null,
+    peopleBreakdown: pax,
     selectedExtras: addonExtras,
   });
+  if (!computedPricing.hasValidPricing && computedPricing.pricingMode === 'category' && !checkoutError) {
+    checkoutError = 'La salida todavía no tiene una tarifa configurada para todas las categorías. Elegí otra fecha o contactanos.';
+  }
   const pricing = {
     unitAmountAdults: computedPricing.unitAmountAdults,
     unitAmountMinors: computedPricing.unitAmountMinors,
     baseSubtotalAmount: computedPricing.baseSubtotalAmount,
     extrasTotalAmount: computedPricing.extrasTotalAmount,
     subtotalAmount: computedPricing.subtotalAmount,
+    categoryPriceBreakdown: computedPricing.categoryPriceBreakdown,
     currency: computedPricing.currency ?? 'ars',
   };
 

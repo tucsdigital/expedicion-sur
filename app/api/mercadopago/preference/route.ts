@@ -458,6 +458,15 @@ export async function POST(request: Request) {
       }
       const peopleAdults = typeof (it as any).peopleAdults === 'number' ? Number((it as any).peopleAdults) : null;
       const peopleMinors = typeof (it as any).peopleMinors === 'number' ? Number((it as any).peopleMinors) : null;
+      const peopleBreakdown = (it as any).peopleBreakdown && typeof (it as any).peopleBreakdown === 'object'
+        ? normalizePeopleBreakdown({
+            breakdown: (it as any).peopleBreakdown,
+            categories: normalizePeopleCategories(experience.bookingConfig?.peopleCategories, departureConfig.maxPeople),
+          })
+        : null;
+      if (peopleBreakdown && getPeopleBreakdownTotal(peopleBreakdown) !== people) {
+        return NextResponse.json({ error: 'La cantidad de pasajeros por categoría no coincide con el total del carrito.' }, { status: 400 });
+      }
       const depositPercentAdults = typeof (it as any).depositPercentAdults === 'number' ? Number((it as any).depositPercentAdults) : null;
       const depositPercentMinors = typeof (it as any).depositPercentMinors === 'number' ? Number((it as any).depositPercentMinors) : null;
 
@@ -465,12 +474,16 @@ export async function POST(request: Request) {
         people,
         peopleAdults,
         peopleMinors,
+        peopleBreakdown,
         depositPercentAdults,
         depositPercentMinors,
         selectedExtras: Array.isArray((it as any).selectedExtras) ? (it as any).selectedExtras : null,
       });
       if (computedPricing.pricingMode === 'percent' && computedPricing.baseUnitAmount < 1) {
         return NextResponse.json({ error: `Falta precio base para calcular porcentaje (${experience.titulo ?? (experience as any).title ?? 'Experiencia'}).` }, { status: 400 });
+      }
+      if (!computedPricing.hasValidPricing) {
+        return NextResponse.json({ error: `Falta configurar el precio de todas las categorías para ${experience.titulo ?? 'esta experiencia'}.` }, { status: 400 });
       }
       const unitAmount = computedPricing.unitAmount;
       if (unitAmount < 1 || computedPricing.subtotalAmount < 1) {
@@ -551,12 +564,14 @@ export async function POST(request: Request) {
         people,
         peopleAdults: computedPricing.peopleAdults,
         peopleMinors: computedPricing.peopleMinors,
+        peopleBreakdown: computedPricing.peopleBreakdown,
         selectedExtras: Array.isArray((it as any).selectedExtras) ? (it as any).selectedExtras : null,
         unitAmount,
         pricingMode: computedPricing.pricingMode,
         pricingBaseUnitAmount: computedPricing.baseUnitAmount,
         unitAmountAdults: computedPricing.unitAmountAdults,
         unitAmountMinors: computedPricing.unitAmountMinors,
+        categoryPriceBreakdown: computedPricing.categoryPriceBreakdown,
         depositPercentAdults: computedPricing.depositPercentAdults,
         depositPercentMinors: computedPricing.depositPercentMinors,
         baseSubtotalAmount: computedPricing.baseSubtotalAmount,
@@ -904,6 +919,7 @@ export async function POST(request: Request) {
     people,
     peopleAdults,
     peopleMinors,
+    peopleBreakdown: breakdown,
     selectedExtras: directSelectedExtras,
   });
   const unitPrice = computedPricing.unitAmount;
@@ -911,6 +927,9 @@ export async function POST(request: Request) {
 
   if (computedPricing.pricingMode === 'percent' && computedPricing.baseUnitAmount < 1) {
     return NextResponse.json({ error: 'Falta precio base para calcular porcentaje.' }, { status: 400 });
+  }
+  if (!computedPricing.hasValidPricing) {
+    return NextResponse.json({ error: 'Falta configurar el precio de todas las categorías para esta fecha.' }, { status: 400 });
   }
   if (unitPrice < 1 || computedPricing.subtotalAmount < 1) {
     return NextResponse.json({ error: 'Precio de reserva no configurado para esta experiencia.' }, { status: 400 });
@@ -983,9 +1002,9 @@ export async function POST(request: Request) {
            experienceSlug: experience.slug,
           date,
           people,
-          peopleAdults,
-          peopleMinors,
-          ...(breakdown ? { peopleBreakdown: breakdown } : {}),
+           peopleAdults,
+           peopleMinors,
+           ...(breakdown ? { peopleBreakdown: breakdown } : {}),
           checkoutIntentId: intentId,
           externalReference,
           expiresAt: holdExpiresAt,
@@ -1031,6 +1050,7 @@ export async function POST(request: Request) {
       ? (parsed.data as any).addonIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
       : null,
     baseSubtotalAmount: computedPricing.baseSubtotalAmount,
+    categoryPriceBreakdown: computedPricing.categoryPriceBreakdown,
     extrasTotalAmount: computedPricing.extrasTotalAmount,
     amountTotal: sessionAmount,
     currency: currency.toLowerCase(),

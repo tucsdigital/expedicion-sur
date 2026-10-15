@@ -31,6 +31,13 @@ type CheckoutPricing = {
   baseSubtotalAmount: number;
   extrasTotalAmount: number;
   subtotalAmount: number;
+  categoryPriceBreakdown?: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }>;
   currency: string;
 };
 
@@ -152,6 +159,15 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
   });
 
   const bookingConfig = experience.bookingConfig as any;
+  const peopleCategoryLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const category of Array.isArray(bookingConfig?.peopleCategories) ? bookingConfig.peopleCategories : []) {
+      const key = String(category?.key ?? '').trim();
+      const label = String(category?.label ?? '').trim();
+      if (key && label) labels[key] = label;
+    }
+    return labels;
+  }, [bookingConfig]);
   const currency = pricing?.currency ?? (bookingConfig?.currency === 'usd' || bookingConfig?.currency === 'brl' ? bookingConfig.currency : 'ars');
   const total = pricing?.subtotalAmount ?? 0;
   const extrasTotalAmount = pricing?.extrasTotalAmount ?? 0;
@@ -185,8 +201,8 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
     () =>
       Object.entries(pax ?? {})
         .filter(([, value]) => Number(value) > 0)
-        .map(([key, value]) => ({ key, label: PEOPLE_CATEGORY_LABELS[key] ?? key, value: Number(value) })),
-    [pax]
+        .map(([key, value]) => ({ key, label: peopleCategoryLabels[key] ?? PEOPLE_CATEGORY_LABELS[key] ?? key, value: Number(value) })),
+    [pax, peopleCategoryLabels]
   );
 
   const steps = useMemo(
@@ -841,14 +857,33 @@ export default function CheckoutClient({ experience, date, people, pax, pricing,
 
                 {showPriceBreakdown ? (
                   <div className="mt-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="text-[#486887]">
-                        Subtotal · {travelerCount} {travelerCount === 1 ? 'pasajero' : 'pasajeros'}
-                      </span>
-                      <span className="font-semibold tabular-nums text-[#12325D]">
-                        {formatMoney(baseSubtotalAmount / 100, currency)}
-                      </span>
-                    </div>
+                    {pricing?.categoryPriceBreakdown?.some((item) => item.people > 0) ? (
+                      <div className="space-y-2">
+                        {pricing.categoryPriceBreakdown.filter((item) => item.people > 0).map((item) => (
+                          <div key={item.key} className="flex items-center justify-between gap-3 text-sm">
+                            <span className="text-[#486887]">
+                              {item.people} {item.label} × {formatMoney(item.unitAmount / 100, currency)}
+                            </span>
+                            <span className="font-semibold tabular-nums text-[#12325D]">
+                              {formatMoney(item.subtotalAmount / 100, currency)}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between gap-3 border-t border-[#E3EDF7] pt-2 text-sm">
+                          <span className="font-semibold text-[#486887]">Subtotal de pasajeros</span>
+                          <span className="font-semibold tabular-nums text-[#12325D]">{formatMoney(baseSubtotalAmount / 100, currency)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-[#486887]">
+                          Subtotal · {travelerCount} {travelerCount === 1 ? 'pasajero' : 'pasajeros'}
+                        </span>
+                        <span className="font-semibold tabular-nums text-[#12325D]">
+                          {formatMoney(baseSubtotalAmount / 100, currency)}
+                        </span>
+                      </div>
+                    )}
 
                     {checkoutExtras.items.length > 0 ? (
                       <div className="space-y-2.5">

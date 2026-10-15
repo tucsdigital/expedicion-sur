@@ -14,6 +14,13 @@ export function buildReservationPricingSnapshot(input: {
   amountTotal: number;
   baseSubtotalAmount?: number | null;
   extrasTotalAmount?: number | null;
+  categoryPriceBreakdown?: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }> | null;
   currency?: string | null;
   paymentMethod: unknown;
 }): ReservationPricingSnapshot {
@@ -41,6 +48,15 @@ export function buildReservationPricingSnapshot(input: {
       typeof input.extrasTotalAmount === 'number' && Number.isFinite(input.extrasTotalAmount)
         ? Math.max(0, Math.round(input.extrasTotalAmount))
         : null,
+    categoryPriceBreakdown: Array.isArray(input.categoryPriceBreakdown)
+      ? input.categoryPriceBreakdown.map((item) => ({
+          key: String(item.key ?? ''),
+          label: String(item.label ?? ''),
+          people: Math.max(0, Math.floor(Number(item.people) || 0)),
+          unitAmount: Math.max(0, Math.round(Number(item.unitAmount) || 0)),
+          subtotalAmount: Math.max(0, Math.round(Number(item.subtotalAmount) || 0)),
+        }))
+      : null,
     currency: String(input.currency || 'ARS').toUpperCase(),
     paymentMethod: normalizeReservationPaymentMethod(input.paymentMethod),
   };

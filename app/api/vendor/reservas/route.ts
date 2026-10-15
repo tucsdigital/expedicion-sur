@@ -15,6 +15,7 @@ import { guardVendor, toJson } from '@/lib/vendor-guard';
 import { isManualReservation, loadVendorReservations, toVendorRow } from '@/lib/vendor-reservations';
 import { getSeatDepartureId, seatIdsFromLabels } from '@/lib/seats/server';
 import { normalizeDigits, normalizeEmail } from '@/lib/reservas/code';
+import { getPeopleBreakdownTotal, normalizePeopleBreakdown, normalizePeopleCategories } from '@/lib/packages/people-categories';
 import {
   computeExperiencePricing,
   resolveExperienceDepartureConfig,
@@ -115,6 +116,7 @@ const bodySchema = z.object({
   packageId: z.string().min(1).optional(),
   date: z.string().min(1),
   people: z.number().int().min(1),
+  peopleBreakdown: z.record(z.string(), z.number().int().min(0).max(50)).optional(),
   customerEmail: z.string().email(),
   customerName: z.string().min(2),
   customerPhone: z.string().max(40).optional(),
@@ -215,6 +217,20 @@ export async function POST(request: Request) {
     const bc = experience.bookingConfig;
     const departureConfig = resolveExperienceDepartureConfig(experience, payload.date);
     const maxPeople = departureConfig.maxPeople;
+    const peopleCategories = normalizePeopleCategories(bc?.peopleCategories, maxPeople);
+    const rawBreakdown = (payload as any).peopleBreakdown;
+    const peopleBreakdown = rawBreakdown ? normalizePeopleBreakdown({ breakdown: rawBreakdown, categories: peopleCategories }) : null;
+    if (peopleBreakdown && getPeopleBreakdownTotal(peopleBreakdown) !== payload.people) {
+      return NextResponse.json({ error: 'La suma de pasajeros por categoría no coincide con el total.' }, { status: 400 });
+    }
+    if (rawBreakdown) {
+      for (const category of peopleCategories) {
+        const count = Number(rawBreakdown[category.key]);
+        if (!Number.isInteger(count) || count < category.min || count > category.max) {
+          return NextResponse.json({ error: `Cantidad inválida para ${category.label}.` }, { status: 400 });
+        }
+      }
+    }
     if (payload.people > maxPeople) {
       return NextResponse.json({ error: `Máximo permitido por reserva: ${maxPeople}` }, { status: 400 });
     }
@@ -255,6 +271,7 @@ export async function POST(request: Request) {
     });
     const repriced = computeExperiencePricing(experience, payload.date, {
       people: payload.people,
+      peopleBreakdown,
       selectedExtras,
     });
     const currency = (repriced.currency ?? 'ars').toLowerCase() as 'ars' | 'brl' | 'usd';
@@ -264,6 +281,9 @@ export async function POST(request: Request) {
         { error: 'Esta experiencia no tiene configurado un valor de reserva válido.' },
         { status: 400 }
       );
+    }
+    if (!repriced.hasValidPricing) {
+      return NextResponse.json({ error: 'Falta configurar el precio de todas las categorías para esta salida.' }, { status: 400 });
     }
     const amountTotal = repriced.subtotalAmount;
 
@@ -327,6 +347,7 @@ export async function POST(request: Request) {
         amountTotal,
         baseSubtotalAmount: repriced.baseSubtotalAmount,
         extrasTotalAmount: repriced.extrasTotalAmount,
+        categoryPriceBreakdown: repriced.categoryPriceBreakdown,
         currency,
         paymentMethod: 'admin',
       }),
@@ -343,6 +364,8 @@ export async function POST(request: Request) {
         title: String(experience.titulo ?? (experience as any).title ?? ''),
       },
       selectedExtras: selectedExtras.length ? (selectedExtras as any) : null,
+      peopleBreakdown: repriced.peopleBreakdown,
+      categoryPriceBreakdown: repriced.categoryPriceBreakdown,
       customerBirthDate: payload.customerBirthDate,
       passengerDetails: payload.passengerDetails ?? [],
       referredBy,

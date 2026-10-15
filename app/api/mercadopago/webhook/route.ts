@@ -736,6 +736,8 @@ export async function POST(request: Request) {
             const pricingBaseUnitAmount = typeof (it as any).pricingBaseUnitAmount === 'number' ? Number((it as any).pricingBaseUnitAmount) : null;
             const unitAmountAdults = typeof (it as any).unitAmountAdults === 'number' ? Number((it as any).unitAmountAdults) : null;
             const unitAmountMinors = typeof (it as any).unitAmountMinors === 'number' ? Number((it as any).unitAmountMinors) : null;
+            const peopleBreakdown = (it as any).peopleBreakdown && typeof (it as any).peopleBreakdown === 'object' ? (it as any).peopleBreakdown : null;
+            const categoryPriceBreakdown = Array.isArray((it as any).categoryPriceBreakdown) ? (it as any).categoryPriceBreakdown : null;
             const depositPercentAdults = typeof (it as any).depositPercentAdults === 'number' ? Number((it as any).depositPercentAdults) : null;
             const depositPercentMinors = typeof (it as any).depositPercentMinors === 'number' ? Number((it as any).depositPercentMinors) : null;
             const holdId = it.holdId ? String(it.holdId) : null;
@@ -863,14 +865,16 @@ export async function POST(request: Request) {
                 people,
                 peopleAdults: typeof (it as any).peopleAdults === 'number' ? Number((it as any).peopleAdults) : null,
                 peopleMinors: typeof (it as any).peopleMinors === 'number' ? Number((it as any).peopleMinors) : null,
+                peopleBreakdown,
                 seatLayoutId:
                   (typeof (it as any).seatLayoutId === 'string' ? String((it as any).seatLayoutId).trim() : '') ||
                   (pkg ? resolveExperienceDepartureConfig(pkg, date).seatLayoutId : null),
                 selectedSeats: Array.isArray((it as any).selectedSeats) ? (it as any).selectedSeats : null,
-                pricingMode: pricingMode === 'percent' || pricingMode === 'fixed' ? pricingMode : null,
+                pricingMode: pricingMode === 'percent' || pricingMode === 'fixed' || pricingMode === 'category' ? pricingMode : null,
                 pricingBaseUnitAmount: pricingBaseUnitAmount !== null ? pricingBaseUnitAmount : null,
                 unitAmountAdults: unitAmountAdults !== null ? unitAmountAdults : null,
                 unitAmountMinors: unitAmountMinors !== null ? unitAmountMinors : null,
+                categoryPriceBreakdown,
                 depositPercentAdults: depositPercentAdults !== null ? depositPercentAdults : null,
                 depositPercentMinors: depositPercentMinors !== null ? depositPercentMinors : null,
                 selectedExtras: itemPriceBreakdown.selectedExtras,
@@ -924,6 +928,7 @@ export async function POST(request: Request) {
                         ? Number(intentData.baseSubtotalAmount)
                         : null,
                   extrasTotalAmount: itemPriceBreakdown.extrasTotalAmount ?? null,
+                  categoryPriceBreakdown,
                   currency: currency || paymentInfo.currency_id || 'ars',
                   paymentMethod: 'mercadopago',
                 }),
@@ -1525,6 +1530,8 @@ export async function POST(request: Request) {
             experienceTitle: finalPackageTitle,
             date,
             people,
+            peopleBreakdown: (intentData as any).peopleBreakdown ?? null,
+            categoryPriceBreakdown: Array.isArray((intentData as any).categoryPriceBreakdown) ? (intentData as any).categoryPriceBreakdown : null,
             selectedExtras: Array.isArray((intentData as any).selectedExtras) ? (intentData as any).selectedExtras : null,
             baseSubtotalAmount:
               typeof (intentData as any).baseSubtotalAmount === 'number'
@@ -1580,6 +1587,9 @@ export async function POST(request: Request) {
                 typeof (intentData as any).extrasTotalAmount === 'number'
                   ? Number((intentData as any).extrasTotalAmount)
                   : null,
+              categoryPriceBreakdown: Array.isArray((intentData as any).categoryPriceBreakdown)
+                ? (intentData as any).categoryPriceBreakdown
+                : null,
               currency: currency || paymentInfo.currency_id || 'ars',
               paymentMethod: 'mercadopago',
             }),

@@ -198,7 +198,7 @@ export default async function ExperienciaPage({ params }: { params: Promise<{ sl
       const available = await getAvailableForPackageDate(paquete, salida.fecha);
       return {
         date: salida.fecha,
-        available,
+        available: resolved.categoryPricingComplete ? available : 0,
         capacity: resolved.baseCapacity,
       };
     })

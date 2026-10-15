@@ -14,6 +14,7 @@ import {
   normalizePeopleBreakdown,
   normalizePeopleCategories,
 } from '../lib/packages/people-categories.ts';
+import { computeReservationPricing } from '../lib/packages/resolve-departure.ts';
 
 test('extrae el src de un iframe de Google Maps', () => {
   const iframe = '<iframe src="https://www.google.com/maps/embed?pb=!1m18!2m3"></iframe>';
@@ -129,4 +130,67 @@ test('normaliza pax por mínimos y clampa al máximo por reserva', () => {
   const clamped = clampPeopleBreakdownToMax({ breakdown: pax, categories, maxPeoplePerBooking: 4 });
   assert.equal(getPeopleBreakdownTotal(clamped), 4);
   assert.equal(clamped.adults >= 1, true);
+});
+
+test('calcula el total de la salida con el precio de cada categoría', () => {
+  const paquete = {
+    moneda: 'ARS',
+    precio: 90000,
+    capacidadMaxima: 6,
+    bookingConfig: {
+      enabled: true,
+      currency: 'ars',
+      maxPeoplePerBooking: 6,
+      peopleCategories: [
+        { key: 'adults', label: 'Adultos', min: 1, max: 6 },
+        { key: 'minors', label: 'Niños', min: 0, max: 6 },
+      ],
+    },
+    salidas: [{
+      id: 'salida-1',
+      fecha: '2026-12-10',
+      ciudadSalida: '',
+      precio: 90000,
+      moneda: 'ARS',
+      preciosPorCategoria: { adults: 90000, minors: 60000 },
+    }],
+  } as any;
+
+  const pricing = computeReservationPricing(paquete, '2026-12-10', {
+    people: 3,
+    peopleBreakdown: { adults: 2, minors: 1 },
+  });
+
+  assert.equal(pricing.pricingMode, 'category');
+  assert.equal(pricing.baseSubtotalAmount, 24000000);
+  assert.equal(pricing.subtotalAmount, 24000000);
+  assert.deepEqual(pricing.categoryPriceBreakdown.map((item) => [item.key, item.people, item.unitAmount, item.subtotalAmount]), [
+    ['adults', 2, 9000000, 18000000],
+    ['minors', 1, 6000000, 6000000],
+  ]);
+  assert.equal(pricing.hasValidPricing, true);
+});
+
+test('marca como incompleta la salida si falta el precio de una categoría', () => {
+  const paquete = {
+    moneda: 'ARS',
+    precio: 90000,
+    bookingConfig: {
+      enabled: true,
+      currency: 'ars',
+      peopleCategories: [
+        { key: 'adults', label: 'Adultos', min: 1, max: 6 },
+        { key: 'minors', label: 'Niños', min: 0, max: 6 },
+      ],
+    },
+    salidas: [{ id: 'salida-1', fecha: '2026-12-10', precio: 90000, moneda: 'ARS', preciosPorCategoria: { adults: 90000 } }],
+  } as any;
+
+  const pricing = computeReservationPricing(paquete, '2026-12-10', {
+    people: 2,
+    peopleBreakdown: { adults: 1, minors: 1 },
+  });
+
+  assert.equal(pricing.hasValidPricing, false);
+  assert.deepEqual(pricing.missingCategoryKeys, ['minors']);
 });

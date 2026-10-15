@@ -182,7 +182,7 @@ export function toBookingPublicData(
     return {
       date: salida.fecha,
       capacity,
-      available: Math.max(0, capacity - reserved),
+      available: resolved.categoryPricingComplete ? Math.max(0, capacity - reserved) : 0,
       enabled: resolved.enabled,
     };
   });

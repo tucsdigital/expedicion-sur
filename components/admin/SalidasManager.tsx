@@ -10,13 +10,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import type { PeopleCategoryConfig } from '@/lib/packages/people-categories';
 
 type Props = {
   salidas: Salida[];
+  peopleCategories: PeopleCategoryConfig[];
   onSalidasChange: (salidas: Salida[]) => void;
 };
 
-type Draft = Omit<Salida, 'id'>;
+type Draft = Omit<Salida, 'id'> & { useCategoryPricing: boolean };
 
 const EMPTY_DRAFT: Draft = {
   fecha: '',
@@ -26,6 +28,7 @@ const EMPTY_DRAFT: Draft = {
   moneda: 'ARS',
   cupo: undefined,
   observaciones: '',
+  useCategoryPricing: false,
 };
 
 function toIso(date: Date) {
@@ -43,20 +46,32 @@ function formatDate(value: string, long = false) {
   return date.toLocaleDateString('es-AR', long ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } : { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function makeSalida(draft: Draft, fecha: string, id?: string): Salida {
+function makeSalida(draft: Draft, fecha: string, categories: PeopleCategoryConfig[], id?: string): Salida {
+  const categoryPrices = draft.useCategoryPricing
+    ? Object.fromEntries(categories.map((category) => [category.key, Math.max(0, Number(draft.preciosPorCategoria?.[category.key]) || 0)]))
+    : null;
   return {
     id: id || `salida-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     fecha,
     fechaVuelta: draft.fechaVuelta?.trim() || fecha,
     ciudadSalida: draft.ciudadSalida.trim(),
-    precio: Number(draft.precio) || 0,
+    precio: categoryPrices ? Object.values(categoryPrices)[0] ?? 0 : Number(draft.precio) || 0,
+    ...(categoryPrices ? { preciosPorCategoria: categoryPrices } : {}),
     moneda: draft.moneda,
     ...(draft.cupo && draft.cupo > 0 ? { cupo: Math.floor(draft.cupo) } : {}),
     observaciones: draft.observaciones?.trim() || '',
   };
 }
 
-export default function SalidasManager({ salidas, onSalidasChange }: Props) {
+function hasValidDraftPricing(draft: Draft, categories: PeopleCategoryConfig[]) {
+  if (!draft.useCategoryPricing) return Number.isFinite(Number(draft.precio)) && Number(draft.precio) > 0;
+  return categories.length > 0 && categories.every((category) => {
+    const amount = Number(draft.preciosPorCategoria?.[category.key]);
+    return Number.isFinite(amount) && amount > 0;
+  });
+}
+
+export default function SalidasManager({ salidas, peopleCategories, onSalidasChange }: Props) {
   const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
   const today = toIso(new Date());
   const [month, setMonth] = useState(() => {
@@ -108,23 +123,24 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
   };
 
   const addRange = () => {
-    if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) {
-      toast.error('Elegí un rango de fechas válido.');
+    const finalRangeEnd = rangeEnd || rangeStart;
+    if (!rangeStart || !finalRangeEnd || rangeStart > finalRangeEnd) {
+      toast.error('Elegí una fecha o un rango válido.');
       return;
     }
-    if (draft.precio <= 0) {
-      toast.error('Cargá el precio antes de agregar las fechas.');
+    if (!hasValidDraftPricing(draft, peopleCategories)) {
+      toast.error(draft.useCategoryPricing ? 'Ingresá un precio mayor a cero para cada categoría.' : 'Cargá el precio antes de agregar las fechas.');
       return;
     }
 
     const next = [...salidas];
     const cursor = parseIso(rangeStart);
-    const end = parseIso(rangeEnd);
+    const end = parseIso(finalRangeEnd);
     let added = 0;
     while (cursor <= end) {
       const date = toIso(cursor);
       if (date >= today && !datesByIso.has(date)) {
-        next.push(makeSalida(draft, date));
+        next.push(makeSalida(draft, date, peopleCategories));
         added += 1;
       }
       cursor.setDate(cursor.getDate() + 1);
@@ -150,12 +166,14 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
       moneda: salida.moneda,
       cupo: salida.cupo,
       observaciones: salida.observaciones || '',
+      preciosPorCategoria: salida.preciosPorCategoria ? { ...salida.preciosPorCategoria } : undefined,
+      useCategoryPricing: Boolean(salida.preciosPorCategoria && Object.keys(salida.preciosPorCategoria).length),
     });
   };
 
   const saveEdit = () => {
-    if (!editingId || !draft.fecha || !draft.fechaVuelta || draft.precio <= 0) {
-      toast.error('Completá ida, vuelta y un precio válido.');
+    if (!editingId || !draft.fecha || !draft.fechaVuelta || !hasValidDraftPricing(draft, peopleCategories)) {
+      toast.error(draft.useCategoryPricing ? 'Completá ida, vuelta y un precio mayor a cero para cada categoría.' : 'Completá ida, vuelta y un precio válido.');
       return;
     }
     if (draft.fechaVuelta < draft.fecha) {
@@ -166,7 +184,7 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
       toast.error('Ya existe una salida para esa fecha.');
       return;
     }
-    onSalidasChange(salidas.map((salida) => salida.id === editingId ? makeSalida(draft, draft.fecha, editingId) : salida));
+    onSalidasChange(salidas.map((salida) => salida.id === editingId ? makeSalida(draft, draft.fecha, peopleCategories, editingId) : salida));
     resetEditor();
     toast.success('Salida actualizada.');
   };
@@ -177,6 +195,55 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
     if (currentPage > 1 && paginatedSalidas.length === 1) setPage((value) => Math.max(1, value - 1));
     toast.success('Salida eliminada.');
   };
+
+  const updateCategoryPrice = (key: string, value: number) => {
+    setDraft((current) => ({
+      ...current,
+      preciosPorCategoria: { ...(current.preciosPorCategoria ?? {}), [key]: value },
+    }));
+  };
+
+  const changePricingMode = (useCategoryPricing: boolean) => {
+    setDraft((current) => ({
+      ...current,
+      useCategoryPricing,
+      ...(useCategoryPricing
+        ? {
+            preciosPorCategoria: Object.fromEntries(
+              peopleCategories.map((category) => [category.key, current.preciosPorCategoria?.[category.key] ?? current.precio ?? 0])
+            ),
+          }
+        : {
+            precio: current.preciosPorCategoria?.[peopleCategories[0]?.key ?? ''] ?? current.precio,
+            preciosPorCategoria: undefined,
+          }),
+    }));
+  };
+
+  const priceFields = (idPrefix: string) => draft.useCategoryPricing ? (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-gray-700">Precio total por pasajero y categoría</p>
+      <div className={`grid gap-2 ${idPrefix === 'edit' ? 'sm:grid-cols-2' : ''}`}>
+        {peopleCategories.map((category) => (
+          <div key={category.key}>
+            <Label htmlFor={`${idPrefix}-precio-${category.key}`} className="text-xs">{category.label}</Label>
+            <FormattedAmountInput
+              id={`${idPrefix}-precio-${category.key}`}
+              value={draft.preciosPorCategoria?.[category.key] ?? 0}
+              onChange={(value) => updateCategoryPrice(category.key, value)}
+              className="mt-1 bg-white"
+            />
+          </div>
+        ))}
+      </div>
+      {!peopleCategories.length ? <p className="text-xs text-amber-700">Configurá primero las categorías de pasajeros.</p> : null}
+    </div>
+  ) : (
+    <div>
+      <Label htmlFor={`${idPrefix}-precio`} className="text-xs">Precio único por persona</Label>
+      <FormattedAmountInput id={`${idPrefix}-precio`} value={draft.precio} onChange={(value) => setDraft((prev) => ({ ...prev, precio: value }))} className="mt-1 bg-white" />
+    </div>
+  );
 
   return (
     <div className="space-y-5">
@@ -213,7 +280,17 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
             <div className="flex items-center justify-between"><div><p className="text-sm font-semibold text-gray-900">Agregar fechas</p><p className="mt-1 text-xs text-gray-500">Los datos se aplican al rango elegido.</p></div>{rangeStart ? <button type="button" onClick={() => { setRangeStart(''); setRangeEnd(''); }} className="text-gray-400 hover:text-gray-700" aria-label="Limpiar selección"><X className="h-4 w-4" /></button> : null}</div>
             <div className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="salidas-desde" className="text-xs">Desde</Label><Input id="salidas-desde" type="date" min={today} value={rangeStart} onChange={(event) => setRangeStart(event.target.value)} className="mt-1 bg-white" /></div><div><Label htmlFor="salidas-hasta" className="text-xs">Hasta</Label><Input id="salidas-hasta" type="date" min={rangeStart || today} value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)} className="mt-1 bg-white" /></div></div>
-              <div><Label htmlFor="salidas-precio" className="text-xs">Precio por persona</Label><FormattedAmountInput id="salidas-precio" value={draft.precio} onChange={(value) => setDraft((prev) => ({ ...prev, precio: value }))} className="mt-1 bg-white" /></div>
+              <div>
+                <Label htmlFor="salidas-tipo-precio" className="text-xs">Tipo de precio</Label>
+                <Select value={draft.useCategoryPricing ? 'category' : 'single'} onValueChange={(value) => changePricingMode(value === 'category')}>
+                  <SelectTrigger id="salidas-tipo-precio" className="mt-1 bg-white"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">Precio único</SelectItem>
+                    <SelectItem value="category">Por categoría</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {priceFields('salidas')}
               <div className="grid grid-cols-2 gap-2"><div><Label htmlFor="salidas-moneda" className="text-xs">Moneda</Label><Select value={draft.moneda} onValueChange={(value: Draft['moneda']) => setDraft((prev) => ({ ...prev, moneda: value }))}><SelectTrigger id="salidas-moneda" className="mt-1 bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ARS">ARS</SelectItem><SelectItem value="USD">USD</SelectItem><SelectItem value="EUR">EUR</SelectItem></SelectContent></Select></div><div><Label htmlFor="salidas-cupo" className="text-xs">Cupo</Label><Input id="salidas-cupo" type="number" min={1} value={draft.cupo || ''} onChange={(event) => setDraft((prev) => ({ ...prev, cupo: event.target.value ? Number(event.target.value) : undefined }))} className="mt-1 bg-white" placeholder="Opcional" /></div></div>
               <div><Label htmlFor="salidas-ciudad" className="text-xs">Ciudad de salida</Label><Input id="salidas-ciudad" value={draft.ciudadSalida} onChange={(event) => setDraft((prev) => ({ ...prev, ciudadSalida: event.target.value }))} className="mt-1 bg-white" placeholder="Opcional" /></div>
               <Button type="button" onClick={addRange} className="w-full"><Plus className="mr-2 h-4 w-4" />Agregar fechas</Button>
@@ -223,7 +300,19 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
       ) : (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="flex items-center justify-between"><p className="text-sm font-semibold text-gray-900">Editar salida · {formatDate(draft.fecha, true)}</p><Button type="button" variant="ghost" size="icon" onClick={resetEditor} aria-label="Cancelar edición"><X className="h-4 w-4" /></Button></div>
-          <div className="mt-4 grid gap-3 md:grid-cols-4"><div><Label htmlFor="edit-fecha" className="text-xs">Ida</Label><Input id="edit-fecha" type="date" min={today} value={draft.fecha} onChange={(event) => setDraft((prev) => ({ ...prev, fecha: event.target.value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-vuelta" className="text-xs">Vuelta</Label><Input id="edit-vuelta" type="date" min={draft.fecha || today} value={draft.fechaVuelta} onChange={(event) => setDraft((prev) => ({ ...prev, fechaVuelta: event.target.value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-precio" className="text-xs">Precio</Label><FormattedAmountInput id="edit-precio" value={draft.precio} onChange={(value) => setDraft((prev) => ({ ...prev, precio: value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-cupo" className="text-xs">Cupo</Label><Input id="edit-cupo" type="number" min={1} value={draft.cupo || ''} onChange={(event) => setDraft((prev) => ({ ...prev, cupo: event.target.value ? Number(event.target.value) : undefined }))} className="mt-1 bg-white" /></div></div>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div><Label htmlFor="edit-fecha" className="text-xs">Ida</Label><Input id="edit-fecha" type="date" min={today} value={draft.fecha} onChange={(event) => setDraft((prev) => ({ ...prev, fecha: event.target.value }))} className="mt-1 bg-white" /></div>
+            <div><Label htmlFor="edit-vuelta" className="text-xs">Vuelta</Label><Input id="edit-vuelta" type="date" min={draft.fecha || today} value={draft.fechaVuelta} onChange={(event) => setDraft((prev) => ({ ...prev, fechaVuelta: event.target.value }))} className="mt-1 bg-white" /></div>
+            <div>
+              <Label htmlFor="edit-tipo-precio" className="text-xs">Tipo de precio</Label>
+              <Select value={draft.useCategoryPricing ? 'category' : 'single'} onValueChange={(value) => changePricingMode(value === 'category')}>
+                <SelectTrigger id="edit-tipo-precio" className="mt-1 bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="single">Precio único</SelectItem><SelectItem value="category">Por categoría</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div><Label htmlFor="edit-cupo" className="text-xs">Cupo</Label><Input id="edit-cupo" type="number" min={1} value={draft.cupo || ''} onChange={(event) => setDraft((prev) => ({ ...prev, cupo: event.target.value ? Number(event.target.value) : undefined }))} className="mt-1 bg-white" /></div>
+          </div>
+          <div className="mt-3">{priceFields('edit')}</div>
           <div className="mt-3 grid gap-3 md:grid-cols-2"><div><Label htmlFor="edit-ciudad" className="text-xs">Ciudad de salida</Label><Input id="edit-ciudad" value={draft.ciudadSalida} onChange={(event) => setDraft((prev) => ({ ...prev, ciudadSalida: event.target.value }))} className="mt-1 bg-white" /></div><div><Label htmlFor="edit-observaciones" className="text-xs">Observaciones</Label><Textarea id="edit-observaciones" value={draft.observaciones} onChange={(event) => setDraft((prev) => ({ ...prev, observaciones: event.target.value }))} className="mt-1 bg-white" rows={1} /></div></div>
           <div className="mt-3 flex justify-end"><Button type="button" onClick={saveEdit}>Guardar cambios</Button></div>
         </div>
@@ -277,7 +366,20 @@ export default function SalidasManager({ salidas, onSalidasChange }: Props) {
                       {salida.fechaVuelta && salida.fechaVuelta !== salida.fecha ? <span className="text-gray-400">hasta {formatDate(salida.fechaVuelta)}</span> : null}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
-                      <span className="font-medium text-gray-700">{salida.moneda} {Number(salida.precio || 0).toLocaleString('es-AR')}</span>
+                      {salida.preciosPorCategoria && Object.keys(salida.preciosPorCategoria).length ? (
+                        <>
+                          {peopleCategories.map((category) => (
+                            <span key={category.key} className="font-medium text-gray-700">
+                              {category.label}: {salida.moneda} {Number(salida.preciosPorCategoria?.[category.key] || 0).toLocaleString('es-AR')}
+                            </span>
+                          ))}
+                          {peopleCategories.some((category) => !(Number(salida.preciosPorCategoria?.[category.key]) > 0)) ? (
+                            <span className="font-semibold text-amber-700">Tarifas incompletas</span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="font-medium text-gray-700">{salida.moneda} {Number(salida.precio || 0).toLocaleString('es-AR')} por persona</span>
+                      )}
                       {salida.cupo ? <span>{salida.cupo} cupos</span> : null}
                       {salida.ciudadSalida ? <span className="truncate">{salida.ciudadSalida}</span> : null}
                     </div>

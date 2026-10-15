@@ -336,13 +336,13 @@ function AddonImporter({
   onImport: (items: AddonFormItem[]) => void;
 }) {
   const [packages, setPackages] = useState<Array<{ id: string; titulo: string; count: number; addons: AddonFormItem[] }>>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [sourceId, setSourceId] = useState('');
-  const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [checkedSelection, setCheckedSelection] = useState<{ sourceId: string; ids: string[] }>({ sourceId: '', ids: [] });
+  const checkedIds = checkedSelection.sourceId === sourceId ? checkedSelection.ids : [];
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     getAllPaquetesAdmin()
       .then((all) => {
         if (cancelled) return;
@@ -378,14 +378,16 @@ function AddonImporter({
     };
   }, [currentId]);
 
-  useEffect(() => {
-    setCheckedIds([]);
-  }, [sourceId]);
-
   const source = packages.find((p) => p.id === sourceId) ?? null;
 
   const toggle = (addonId: string) =>
-    setCheckedIds((prev) => (prev.includes(addonId) ? prev.filter((id) => id !== addonId) : [...prev, addonId]));
+    setCheckedSelection((current) => {
+      const selected = current.sourceId === sourceId ? current.ids : [];
+      return {
+        sourceId,
+        ids: selected.includes(addonId) ? selected.filter((id) => id !== addonId) : [...selected, addonId],
+      };
+    });
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -455,7 +457,7 @@ function AddonImporter({
                 return;
               }
               onImport(selected);
-              setCheckedIds([]);
+              setCheckedSelection({ sourceId, ids: [] });
             }}
             disabled={disabled || checkedIds.length === 0}
           >

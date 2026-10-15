@@ -450,6 +450,8 @@ export async function POST(request: Request) {
         people,
         peopleAdults: typeof intentData.peopleAdults === 'number' ? intentData.peopleAdults : null,
         peopleMinors: typeof intentData.peopleMinors === 'number' ? intentData.peopleMinors : null,
+        peopleBreakdown: intentData.peopleBreakdown && typeof intentData.peopleBreakdown === 'object' ? intentData.peopleBreakdown : null,
+        categoryPriceBreakdown: Array.isArray(intentData.categoryPriceBreakdown) ? intentData.categoryPriceBreakdown : null,
         selectedExtras: priceBreakdown.selectedExtras,
         baseSubtotalAmount:
           typeof intentData.baseSubtotalAmount === 'number' ? Number(intentData.baseSubtotalAmount) : null,
@@ -488,6 +490,7 @@ export async function POST(request: Request) {
           baseSubtotalAmount:
             typeof intentData.baseSubtotalAmount === 'number' ? Number(intentData.baseSubtotalAmount) : null,
           extrasTotalAmount: priceBreakdown.extrasTotalAmount ?? null,
+          categoryPriceBreakdown: Array.isArray(intentData.categoryPriceBreakdown) ? intentData.categoryPriceBreakdown : null,
           currency,
           paymentMethod: 'mercadopago',
         }),

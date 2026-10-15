@@ -28,6 +28,8 @@ export interface Salida {
   fechaVuelta?: string; // YYYY-MM-DD (fecha de vuelta)
   ciudadSalida: string;
   precio: number;
+  /** Precio total por pasajero, indexado por las claves estables de bookingConfig.peopleCategories. */
+  preciosPorCategoria?: Record<string, number>;
   moneda: 'USD' | 'ARS' | 'EUR';
   cupo?: number;
   observaciones?: string;
@@ -66,10 +68,10 @@ export type ReservationTravelerDetails = {
   travelerType?: 'adult' | 'minor' | null;
 };
 
-export type ReservationPricingMode = 'fixed' | 'percent';
+export type ReservationPricingMode = 'fixed' | 'percent' | 'category';
 
 export type ReservationPricingConfig = {
-  mode: ReservationPricingMode;
+  mode: 'fixed' | 'percent';
   fixedUnitAmount?: number | null;
   single?: { adultPercent: number; minorPercent?: number | null } | null;
   group?: { adultPercent: number; minorPercent?: number | null } | null;
@@ -253,12 +255,20 @@ export interface CartItem {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
+  peopleBreakdown?: Record<string, number> | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   unitAmount: number;
   pricingMode?: ReservationPricingMode | null;
   pricingBaseUnitAmount?: number | null;
   unitAmountAdults?: number | null;
   unitAmountMinors?: number | null;
+  categoryPriceBreakdown?: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }> | null;
   depositPercentAdults?: number | null;
   depositPercentMinors?: number | null;
   baseSubtotalAmount?: number | null;
@@ -285,6 +295,7 @@ export interface ReservationHold {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
+  peopleBreakdown?: Record<string, number> | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   pricingMode?: ReservationPricingMode | null;
   pricingBaseUnitAmount?: number | null;
@@ -326,12 +337,20 @@ export interface OrderItemSnapshot {
   people: number;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
+  peopleBreakdown?: Record<string, number> | null;
   selectedExtras?: ReservationExtraSelection[] | null;
   unitAmount: number;
   pricingMode?: ReservationPricingMode | null;
   pricingBaseUnitAmount?: number | null;
   unitAmountAdults?: number | null;
   unitAmountMinors?: number | null;
+  categoryPriceBreakdown?: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }> | null;
   depositPercentAdults?: number | null;
   depositPercentMinors?: number | null;
   baseSubtotalAmount?: number | null;

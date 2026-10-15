@@ -42,6 +42,13 @@ import {
   resolveExperienceExtraSelections,
 } from '@/lib/experience-booking';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  clampPeopleBreakdownToMax,
+  getPeopleBreakdownTotal,
+  normalizePeopleBreakdown,
+  normalizePeopleCategories,
+  type PeopleBreakdown,
+} from '@/lib/packages/people-categories';
 
 type Props = {
   experiencias: ExperienciaCatalogo[];
@@ -56,6 +63,7 @@ type Props = {
     date?: string;
     peopleAdults?: number;
     peopleMinors?: number;
+    peopleBreakdown?: PeopleBreakdown;
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
@@ -139,15 +147,18 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
     initialData?.experienceId ?? experiencias[0]?.id ?? ''
   );
   const [date, setDate] = useState<string>(initialData?.date ?? 'sin-fecha');
-  const [adults, setAdults] = useState<number>(() => {
-    const val = initialData?.peopleAdults;
-    return typeof val === 'number' && val > 0 ? val : 1;
+  const [peopleBreakdownInput, setPeopleBreakdownInput] = useState<PeopleBreakdown>(() => {
+    const experience = experiencias.find((item) => item.id === (initialData?.experienceId ?? experiencias[0]?.id));
+    const maxPeople = experience?.bookingConfig?.maxPeoplePerBooking ?? experience?.capacidadMaxima ?? 50;
+    const categories = normalizePeopleCategories(experience?.bookingConfig?.peopleCategories, maxPeople);
+    return normalizePeopleBreakdown({
+      breakdown: initialData?.peopleBreakdown ?? {
+        adults: initialData?.peopleAdults ?? 1,
+        minors: initialData?.peopleMinors ?? 0,
+      },
+      categories,
+    });
   });
-  const [minors, setMinors] = useState<number>(() => {
-    const val = initialData?.peopleMinors;
-    return typeof val === 'number' && val > 0 ? val : 0;
-  });
-  const peopleTotal = useMemo(() => Math.max(0, (Number(adults) || 0) + (Number(minors) || 0)), [adults, minors]);
   const [depositPercentAdults, setDepositPercentAdults] = useState<string>('');
   const [depositPercentMinors, setDepositPercentMinors] = useState<string>('');
   const [form, setForm] = useState<FormState>(() => {
@@ -201,6 +212,24 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
     () => experiencias.find((item) => item.id === selectedExperienceId) ?? null,
     [experiencias, selectedExperienceId]
   );
+  const peopleCategories = useMemo(
+    () => normalizePeopleCategories(
+      selectedExperience?.bookingConfig?.peopleCategories,
+      selectedExperience?.bookingConfig?.maxPeoplePerBooking ?? selectedExperience?.capacidadMaxima ?? 50
+    ),
+    [selectedExperience]
+  );
+  const peopleBreakdown = useMemo(
+    () => clampPeopleBreakdownToMax({
+      breakdown: normalizePeopleBreakdown({ breakdown: peopleBreakdownInput, categories: peopleCategories }),
+      categories: peopleCategories,
+      maxPeoplePerBooking: selectedExperience?.bookingConfig?.maxPeoplePerBooking ?? selectedExperience?.capacidadMaxima ?? 50,
+    }),
+    [peopleBreakdownInput, peopleCategories, selectedExperience]
+  );
+  const peopleTotal = useMemo(() => getPeopleBreakdownTotal(peopleBreakdown), [peopleBreakdown]);
+  const adults = peopleBreakdown.adults ?? 0;
+  const minors = peopleBreakdown.minors ?? 0;
 
   useEffect(() => {
     if (experiencias.length > 0 && !selectedExperienceId) {
@@ -291,6 +320,15 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
       customerCountry: countryName,
       customerPhone: applyPhonePrefix(prev.customerPhone, getCountryDialCode(countryName)),
     }));
+  };
+
+  const updatePeopleCategoryCount = (key: string, rawValue: string) => {
+    const maxPeople = selectedExperience?.bookingConfig?.maxPeoplePerBooking ?? selectedExperience?.capacidadMaxima ?? 50;
+    const value = Math.max(0, Math.min(50, Math.floor(Number(rawValue) || 0)));
+    setPeopleBreakdownInput((current) => {
+      const next = normalizePeopleBreakdown({ breakdown: { ...current, [key]: value }, categories: peopleCategories });
+      return clampPeopleBreakdownToMax({ breakdown: next, categories: peopleCategories, maxPeoplePerBooking: maxPeople });
+    });
   };
 
   const selectedDialCode = getCountryDialCode(form.customerCountry) || '+54';
@@ -394,13 +432,15 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
     const dpAdults = depositPercentAdults.trim() ? Number(depositPercentAdults) : NaN;
     const dpMinors = depositPercentMinors.trim() ? Number(depositPercentMinors) : NaN;
     return computeExperiencePricing(selectedExperience, date, {
+      people: peopleTotal,
       peopleAdults: Math.max(0, Number(adults) || 0),
       peopleMinors: Math.max(0, Number(minors) || 0),
+      peopleBreakdown,
       depositPercentAdults: Number.isFinite(dpAdults) ? dpAdults : null,
       depositPercentMinors: Number.isFinite(dpMinors) ? dpMinors : null,
       selectedExtras,
     });
-  }, [adults, date, depositPercentAdults, depositPercentMinors, minors, selectedExtras, selectedExperience]);
+  }, [adults, date, depositPercentAdults, depositPercentMinors, minors, peopleBreakdown, peopleTotal, selectedExtras, selectedExperience]);
   const amountTotal = useMemo(() => computedPricing?.subtotalAmount ?? 0, [computedPricing]);
   const amountLabel = useMemo(() => {
     const value = amountTotal / 100;
@@ -612,6 +652,8 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
         body: JSON.stringify({
           experienceId: selectedExperience.id,
           date,
+          people: peopleTotal,
+          peopleBreakdown,
           peopleAdults: Math.max(0, Number(adults) || 0),
           peopleMinors: Math.max(0, Number(minors) || 0),
           ...(!hideStatus ? { status } : {}),
@@ -764,28 +806,20 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
                   <p className="text-xs capitalize text-gray-500">{formattedDateLabel}</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Pasajeros</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-gray-500">Adultos</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={50}
-                        value={adults}
-                        onChange={(e) => setAdults(parseInt(e.target.value || '0', 10))}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-gray-500">Menores</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={50}
-                        value={minors}
-                        onChange={(e) => setMinors(parseInt(e.target.value || '0', 10))}
-                      />
-                    </div>
+                    {peopleCategories.map((category) => (
+                      <div key={category.key} className="space-y-1">
+                        <Label htmlFor={`reservation-category-${category.key}`} className="text-xs text-gray-500">{category.label}</Label>
+                        <Input
+                          id={`reservation-category-${category.key}`}
+                          type="number"
+                          min={category.min}
+                          max={category.max}
+                          value={peopleBreakdown[category.key] ?? category.min}
+                          onChange={(event) => updatePeopleCategoryCount(category.key, event.target.value)}
+                        />
+                      </div>
+                    ))}
                   </div>
                   <p className="text-xs text-gray-500">
                     Máximo por reserva:{' '}
@@ -794,7 +828,7 @@ export default function AdminReservaForm({ experiencias, hideReferral, hideVendo
                 </div>
               </div>
 
-              {selectedExperience?.reservationPricing?.mode === 'percent' ? (
+              {selectedExperience?.reservationPricing?.mode === 'percent' && !resolvedSelectedDeparture?.categoryPricingEnabled ? (
                 <div className="grid gap-3 rounded-2xl bg-gray-50 p-4 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label className="text-xs text-gray-600">Adultos (%)</Label>

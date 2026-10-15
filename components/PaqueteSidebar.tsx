@@ -16,7 +16,7 @@ import {
   getMaxSelectablePeople,
   type BookingAvailabilityItem,
 } from '@/lib/packages/booking-calendar';
-import { getPackageAddonOptions } from '@/lib/packages/resolve-departure';
+import { computeReservationPricing, getPackageAddonOptions } from '@/lib/packages/resolve-departure';
 import {
   buildLeadTimeMessage,
   getFirstBookableDateIso,
@@ -121,6 +121,11 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
     [maxPeoplePerBooking, paquete.bookingConfig, locale, defaultAdultsLabel, defaultMinorsLabel]
   );
   const specialPrice = Number(paquete.precioDescuentoPrimerosCupos ?? 0);
+  const categoryPrices = (paquete.salidas ?? []).flatMap((salida) =>
+    Object.values(salida.preciosPorCategoria ?? {}).map((amount) => Number(amount)).filter((amount) => Number.isFinite(amount) && amount > 0)
+  );
+  const hasCategoryPricing = categoryPrices.length > 0;
+  const advertisedPrice = hasCategoryPricing ? Math.min(...categoryPrices) : Number(paquete.precio || 0);
   const specialDeadline = formatPromoDeadline(paquete.tarifaEspecialFechaLimite, locale);
   const specialDeadlineDate = parsePromoDeadline(paquete.tarifaEspecialFechaLimite);
   const [renderedAt] = useState(() => Date.now());
@@ -132,6 +137,7 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
   );
   const leadTimeNotice = useMemo(() => (minLeadHours > 0 ? buildLeadTimeMessage(minLeadHours, locale) : ''), [minLeadHours, locale]);
   const hasSpecialPrice =
+    !hasCategoryPricing &&
     specialPrice > 0 &&
     paquete.precio > 0 &&
     specialPrice < paquete.precio &&
@@ -178,6 +184,11 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
   const selectedAvailability = useMemo(
     () => visibleBookingDates.find((item) => item.date === selectedDate) ?? null,
     [selectedDate, visibleBookingDates]
+  );
+
+  const selectedPricing = useMemo(
+    () => selectedDate ? computeReservationPricing(paquete, selectedDate, { people, peopleBreakdown: pax }) : null,
+    [paquete, pax, people, selectedDate]
   );
 
   const getSalidaForDate = (date: string) => paquete.salidas?.find((salida) => salida.fecha === date) ?? null;
@@ -348,7 +359,7 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
             <div className="mt-1">
               <div className="flex items-baseline gap-2 text-gray-500">
                 <span className="text-lg font-semibold leading-none line-through decoration-2">
-                  ${paquete.precio.toLocaleString(numLocale)}
+                  ${advertisedPrice.toLocaleString(numLocale)}
                 </span>
                 <span className="text-xs font-extrabold uppercase">{paquete.moneda || 'ARS'}</span>
               </div>
@@ -366,7 +377,7 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
           ) : (
             <div className="mt-1 flex items-baseline gap-2">
               <span className="text-[38px] font-black leading-none tracking-[-0.02em] text-black">
-                ${paquete.precio.toLocaleString(numLocale)}
+                ${advertisedPrice.toLocaleString(numLocale)}
               </span>
               <span className="text-sm font-extrabold uppercase text-gray-600">{paquete.moneda || 'ARS'}</span>
             </div>
@@ -809,13 +820,31 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
                                   </div>
                                 </div>
                                 {selectedAvailability ? (
-                                  <div className="text-right">
-                                    <div className="text-[15px] font-bold tracking-[-0.01em] text-neutral-900">
-                                      {getSalidaForDate(selectedDate)?.moneda || paquete.moneda || 'ARS'} $
-                                      {Number(getSalidaForDate(selectedDate)?.precio ?? paquete.precio ?? 0).toLocaleString(numLocale)}
+                                  selectedPricing?.pricingMode === 'category' ? (
+                                    <div className="max-w-[65%] space-y-1 text-right">
+                                      {selectedPricing.categoryPriceBreakdown.map((item) => (
+                                        <div key={item.key} className="text-[11px] font-medium text-neutral-600">
+                                          {item.label}: {getSalidaForDate(selectedDate)?.moneda || paquete.moneda || 'ARS'} {Number(item.unitAmount / 100).toLocaleString(numLocale)}
+                                          <span className="text-neutral-400"> / {s('perPersonLower')}</span>
+                                        </div>
+                                      ))}
+                                      {selectedPricing.hasValidPricing ? (
+                                        <div className="pt-1 text-[13px] font-bold text-neutral-900">
+                                          Total pasajeros: {getSalidaForDate(selectedDate)?.moneda || paquete.moneda || 'ARS'} {Number(selectedPricing.baseSubtotalAmount / 100).toLocaleString(numLocale)}
+                                        </div>
+                                      ) : (
+                                        <div className="text-[11px] font-semibold text-amber-700">Tarifas incompletas</div>
+                                      )}
                                     </div>
-                                    <div className="text-[11px] font-medium text-neutral-400">{s('perPersonLower')}</div>
-                                  </div>
+                                  ) : (
+                                    <div className="text-right">
+                                      <div className="text-[15px] font-bold tracking-[-0.01em] text-neutral-900">
+                                        {getSalidaForDate(selectedDate)?.moneda || paquete.moneda || 'ARS'} $
+                                        {Number(getSalidaForDate(selectedDate)?.precio ?? paquete.precio ?? 0).toLocaleString(numLocale)}
+                                      </div>
+                                      <div className="text-[11px] font-medium text-neutral-400">{s('perPersonLower')}</div>
+                                    </div>
+                                  )
                                 ) : null}
                               </div>
                             </motion.div>

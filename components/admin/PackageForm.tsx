@@ -8,7 +8,7 @@ import Link from 'next/link';
 import RichTextEditor from '@/components/admin/RichTextEditor';
 import ItineraryStepsEditor from '@/components/admin/ItineraryStepsEditor';
 import ImageUploader from '@/components/admin/ImageUploader';
-// import AddonsManager from '@/components/admin/AddonsManager'; // TEMPORAL: modulo Adicionales desactivado
+import AddonsManager from '@/components/admin/AddonsManager';
 import EditableList from '@/components/admin/EditableList';
 import DragDropOrderManager from '@/components/admin/DragDropOrderManager';
 import SalidasManager from '@/components/admin/SalidasManager';
@@ -33,6 +33,7 @@ import {
 } from '@/lib/packages/admin-form';
 import type { AddonFormItem } from '@/lib/packages/package-addons';
 import { humanizeExcursionType, type ExcursionTypeOption } from '@/lib/packages/package-types';
+import { normalizePeopleCategories } from '@/lib/packages/people-categories';
 
 type Props = {
   mode: 'create' | 'edit';
@@ -124,6 +125,7 @@ export default function PackageForm(props: Props) {
   } = props;
   const [newTypeLabel, setNewTypeLabel] = useState('');
   const [creatingType, setCreatingType] = useState(false);
+  const peopleCategoriesForPricing = normalizePeopleCategories(watch('peopleCategories'), 50);
 
   const visible = watch('visible');
   const destacado = watch('destacado');
@@ -715,11 +717,10 @@ export default function PackageForm(props: Props) {
             <p className="text-base text-gray-600 mt-1">Carga salidas solo si esta experiencia las necesita</p>
           </CardHeader>
           <CardContent>
-            <SalidasManager salidas={salidas} onSalidasChange={onSalidasChange} />
+            <SalidasManager salidas={salidas} peopleCategories={peopleCategoriesForPricing} onSalidasChange={onSalidasChange} />
           </CardContent>
         </Card>
 
-        {/* TEMPORAL: modulo "Adicionales" desactivado. Descomentar (y el import de AddonsManager) para volver a usarlo.
         <Card id="adicionales-section">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2">
@@ -731,10 +732,9 @@ export default function PackageForm(props: Props) {
             </p>
           </CardHeader>
           <CardContent>
-            <AddonsManager items={addons} onItemsChange={onAddonsChange} disabled={isBusy} />
+            <AddonsManager items={addons} onItemsChange={onAddonsChange} disabled={isBusy} currentId={currentId} />
           </CardContent>
         </Card>
-        */}
 
         <Card>
           <CardHeader className="pb-4">
@@ -770,7 +770,6 @@ export default function PackageForm(props: Props) {
               />
             </div>
 
-            {/* TEMPORAL: "Anticipacion minima de reserva" desactivada (se mantiene el valor guardado o 48 hs). Descomentar para volver a usarla.
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
               <div className="flex items-center gap-2">
                 <Label htmlFor="minLeadHours">Anticipación mínima de reserva (horas)</Label>
@@ -796,14 +795,13 @@ export default function PackageForm(props: Props) {
               </p>
               {errors.minLeadHours && <p className="text-base text-red-500 mt-1">{errors.minLeadHours.message}</p>}
             </div>
-            */}
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <Label className="text-base">Categorías de pasajeros</Label>
                   <p className="mt-1 text-sm text-gray-500">
-                    Mínimo y máximo de personas por tipo.
+                    Configurá el mínimo y máximo de pasajeros para cada tipo.
                   </p>
                 </div>
                 <Button
@@ -839,7 +837,7 @@ export default function PackageForm(props: Props) {
                 {(Array.isArray(watch('peopleCategories')) ? watch('peopleCategories') : []).map((item: any, index: number) => (
                   <div
                     key={`${item?.key || 'cat'}-${index}`}
-                    className="grid gap-3 rounded-lg border border-gray-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_160px_120px_120px_40px]"
+                    className="grid gap-3 rounded-lg border border-gray-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_120px_120px_40px]"
                   >
                     <div className="space-y-1">
                       <Label className="text-sm text-gray-600">Nombre</Label>
@@ -851,19 +849,6 @@ export default function PackageForm(props: Props) {
                           setValue('peopleCategories', next as any, { shouldValidate: true });
                         }}
                         placeholder="Ej: Adultos"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-sm text-gray-600">Clave</Label>
-                      <Input
-                        value={String(item?.key ?? '')}
-                        onChange={(event) => {
-                          const current = Array.isArray(watch('peopleCategories')) ? (watch('peopleCategories') as any[]) : [];
-                          const next = current.map((row, idx) => (idx === index ? { ...row, key: event.target.value } : row));
-                          setValue('peopleCategories', next as any, { shouldValidate: true });
-                        }}
-                        placeholder="adultos"
                       />
                     </div>
 

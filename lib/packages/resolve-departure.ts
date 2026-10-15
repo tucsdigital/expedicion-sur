@@ -7,6 +7,12 @@ import type {
   SeatLayoutAmenities,
   SeatLayoutTemplate,
 } from '@/types';
+import {
+  normalizePeopleBreakdown,
+  normalizePeopleCategories,
+  type PeopleBreakdown,
+  type PeopleCategoryConfig,
+} from './people-categories.ts';
 
 export type ResolvedDepartureConfig = {
   date: string;
@@ -23,6 +29,10 @@ export type ResolvedDepartureConfig = {
   maxPeople: number;
   seatsEnabled: boolean;
   seatLayoutId: string | null;
+  categoryPricingEnabled: boolean;
+  categoryPricingComplete: boolean;
+  missingCategoryKeys: string[];
+  peopleCategories: PeopleCategoryConfig[];
 };
 
 export type ReservationPricingMode = 'fixed' | 'percent';
@@ -47,7 +57,7 @@ export type ReservationPricingConfig = {
 };
 
 export type ComputedReservationPricing = {
-  pricingMode: ReservationPricingMode;
+  pricingMode: ReservationPricingMode | 'category';
   currency: CartCurrency | null;
   displayCurrency: 'USD' | 'ARS' | 'EUR' | null;
   baseUnitAmount: number;
@@ -63,6 +73,17 @@ export type ComputedReservationPricing = {
   baseSubtotalAmount: number;
   extrasTotalAmount: number;
   subtotalAmount: number;
+  peopleBreakdown: PeopleBreakdown | null;
+  categoryPriceBreakdown: Array<{
+    key: string;
+    label: string;
+    people: number;
+    unitAmount: number;
+    subtotalAmount: number;
+  }>;
+  unitAmountsByCategory: Record<string, number>;
+  missingCategoryKeys: string[];
+  hasValidPricing: boolean;
 };
 
 const EXTRA_LABELS: Record<ReservationExtraCode, string> = {
@@ -272,6 +293,7 @@ export function computeReservationPricing(paquete: Paquete, rawDate: string, inp
   people?: number | null;
   peopleAdults?: number | null;
   peopleMinors?: number | null;
+  peopleBreakdown?: PeopleBreakdown | null;
   depositPercentAdults?: number | null;
   depositPercentMinors?: number | null;
   selectedExtras?: ReservationExtraSelection[] | null;
@@ -286,6 +308,66 @@ export function computeReservationPricing(paquete: Paquete, rawDate: string, inp
 
   const pricingCfg = resolvePackagePricingConfig(paquete);
   const baseUnitAmount = departure.baseUnitAmount;
+
+  const rawCategoryPrices = departure.salida?.preciosPorCategoria;
+  const categoryPricingEnabled = departure.categoryPricingEnabled;
+  if (categoryPricingEnabled) {
+    const categories = departure.peopleCategories;
+    const categoryBreakdown = resolveCategoryBreakdown({
+      inputBreakdown: input?.peopleBreakdown,
+      categories,
+      people,
+      adults: adultsRaw,
+      minors: minorsRaw,
+    });
+    const missingCategoryKeys = departure.missingCategoryKeys;
+    const unitAmountsByCategory: Record<string, number> = {};
+    const categoryPriceBreakdown = categories.map((category) => {
+      const unitAmount = toAmountCents(rawCategoryPrices?.[category.key]);
+      const quantity = Math.max(0, Math.floor(Number(categoryBreakdown[category.key]) || 0));
+      unitAmountsByCategory[category.key] = unitAmount;
+      return {
+        key: category.key,
+        label: category.label,
+        people: quantity,
+        unitAmount,
+        subtotalAmount: unitAmount * quantity,
+      };
+    });
+    const categoryBaseSubtotal = categoryPriceBreakdown.reduce((sum, item) => sum + item.subtotalAmount, 0);
+    const extrasTotalAmount = (input?.selectedExtras ?? []).reduce((sum, extra) => {
+      const amount = Math.max(0, Number(extra?.amount ?? 0) || 0);
+      const scope = String(extra?.scope ?? 'per_person');
+      return sum + (scope === 'per_booking' ? amount : amount * people);
+    }, 0);
+    const firstAmount = categoryPriceBreakdown.find((item) => item.unitAmount > 0)?.unitAmount ?? 0;
+    const unitAmountAdults = unitAmountsByCategory.adults ?? firstAmount;
+    const unitAmountMinors = unitAmountsByCategory.minors ?? firstAmount;
+    const subtotalAmount = categoryBaseSubtotal + extrasTotalAmount;
+    return {
+      pricingMode: 'category',
+      currency: departure.currency,
+      displayCurrency: departure.displayCurrency,
+      baseUnitAmount: firstAmount,
+      people,
+      peopleAdults: categoryBreakdown.adults ?? null,
+      peopleMinors: categoryBreakdown.minors ?? null,
+      depositPercentAdults: null,
+      depositPercentMinors: null,
+      unitAmountAdults,
+      unitAmountMinors,
+      unitAmount: unitAmountAdults || firstAmount,
+      baseSubtotalAmount: categoryBaseSubtotal,
+      extrasTotalAmount,
+      subtotalAmount,
+      peopleBreakdown: categoryBreakdown,
+      categoryPriceBreakdown,
+      unitAmountsByCategory,
+      missingCategoryKeys,
+      hasValidPricing: departure.categoryPricingComplete && missingCategoryKeys.length === 0 && subtotalAmount > 0,
+    };
+  }
+
   const fixedFallback =
     typeof paquete.bookingConfig?.depositAmount === 'number' && paquete.bookingConfig.depositAmount > 0
       ? toAmountCents(paquete.bookingConfig.depositAmount)
@@ -323,6 +405,11 @@ export function computeReservationPricing(paquete: Paquete, rawDate: string, inp
       baseSubtotalAmount,
       extrasTotalAmount,
       subtotalAmount,
+      peopleBreakdown: null,
+      categoryPriceBreakdown: [],
+      unitAmountsByCategory: {},
+      missingCategoryKeys: [],
+      hasValidPricing: unitAmountAdults > 0 && subtotalAmount > 0,
     };
   }
 
@@ -362,7 +449,44 @@ export function computeReservationPricing(paquete: Paquete, rawDate: string, inp
     baseSubtotalAmount,
     extrasTotalAmount,
     subtotalAmount,
+    peopleBreakdown: null,
+    categoryPriceBreakdown: [],
+    unitAmountsByCategory: {},
+    missingCategoryKeys: [],
+    hasValidPricing: unitAmountAdults > 0 && subtotalAmount > 0,
   };
+}
+
+function resolveCategoryBreakdown(params: {
+  inputBreakdown?: PeopleBreakdown | null;
+  categories: PeopleCategoryConfig[];
+  people: number;
+  adults: number | null;
+  minors: number | null;
+}): PeopleBreakdown {
+  const { categories, people } = params;
+  if (params.inputBreakdown && typeof params.inputBreakdown === 'object') {
+    return normalizePeopleBreakdown({ breakdown: params.inputBreakdown, categories });
+  }
+
+  const hasLegacyCounts = params.adults !== null || params.minors !== null;
+  if (hasLegacyCounts) {
+    return normalizePeopleBreakdown({
+      breakdown: { adults: params.adults ?? 0, minors: params.minors ?? 0 },
+      categories,
+    });
+  }
+
+  const result = normalizePeopleBreakdown({ breakdown: null, categories });
+  let remaining = Math.max(0, people - Object.values(result).reduce((sum, quantity) => sum + quantity, 0));
+  for (const category of categories) {
+    if (remaining <= 0) break;
+    const current = result[category.key] ?? 0;
+    const extra = Math.min(remaining, Math.max(0, category.max - current));
+    result[category.key] = current + extra;
+    remaining -= extra;
+  }
+  return result;
 }
 
 export function getOperationalSalidas(paquete: Paquete): Salida[] {
@@ -430,6 +554,19 @@ export function resolveDepartureConfig(paquete: Paquete, rawDate: string): Resol
   const baseCapacity = Math.max(0, Math.floor(explicitCapacity));
   const seatsEnabled = Boolean(salida?.seatSelectionEnabled ?? paquete.seatSelectionEnabled);
   const seatLayoutId = normalizeText(salida?.seatLayoutId) || normalizeText(paquete.seatLayoutId) || null;
+  const categoryPricingEnabled = Boolean(
+    salida?.preciosPorCategoria && typeof salida.preciosPorCategoria === 'object' && Object.keys(salida.preciosPorCategoria).length
+  );
+  const peopleCategories = normalizePeopleCategories(
+    paquete.bookingConfig?.peopleCategories,
+    paquete.bookingConfig?.maxPeoplePerBooking ?? paquete.capacidadMaxima ?? 50
+  );
+  const missingCategoryKeys = categoryPricingEnabled
+    ? peopleCategories.filter((category) => {
+        const amount = Number(salida?.preciosPorCategoria?.[category.key]);
+        return !Number.isFinite(amount) || amount <= 0;
+      }).map((category) => category.key)
+    : [];
 
   return {
     date,
@@ -445,5 +582,9 @@ export function resolveDepartureConfig(paquete: Paquete, rawDate: string): Resol
     maxPeople,
     seatsEnabled,
     seatLayoutId,
+    categoryPricingEnabled,
+    categoryPricingComplete: !categoryPricingEnabled || missingCategoryKeys.length === 0,
+    missingCategoryKeys,
+    peopleCategories,
   };
 }

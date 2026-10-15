@@ -252,12 +252,21 @@ export function sanitizePackageSalidas(salidas: Salida[]): Salida[] {
     const fecha = String((salida as any)?.fecha ?? '').trim();
     const id = String((salida as any)?.id ?? '').trim();
     const moneda = String((salida as any)?.moneda ?? 'ARS').trim().toUpperCase();
+    const rawCategoryPrices = (salida as any)?.preciosPorCategoria;
+    const preciosPorCategoria = rawCategoryPrices && typeof rawCategoryPrices === 'object' && !Array.isArray(rawCategoryPrices)
+      ? Object.fromEntries(
+          Object.entries(rawCategoryPrices)
+            .map(([key, value]) => [String(key).trim(), Number(value)] as const)
+            .filter(([key, value]) => Boolean(key) && Number.isFinite(value) && value >= 0)
+        )
+      : null;
     return {
       ...(id ? { id } : {}),
       fecha,
       fechaVuelta: String((salida as any)?.fechaVuelta ?? '').trim() || fecha,
       ciudadSalida: String((salida as any)?.ciudadSalida ?? '').trim(),
       precio: Number((salida as any)?.precio ?? 0) || 0,
+      ...(preciosPorCategoria && Object.keys(preciosPorCategoria).length ? { preciosPorCategoria } : {}),
       observaciones: String((salida as any)?.observaciones ?? '').trim(),
       moneda: moneda === 'USD' || moneda === 'EUR' ? moneda : 'ARS',
       ...(typeof (salida as any)?.cupo === 'number' && Number((salida as any).cupo) > 0

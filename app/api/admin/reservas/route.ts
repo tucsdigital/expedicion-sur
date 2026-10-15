@@ -39,6 +39,7 @@ import {
   resolveExperienceExtraSelections,
 } from '@/lib/experience-booking';
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
+import { getPeopleBreakdownTotal, normalizePeopleBreakdown, normalizePeopleCategories } from '@/lib/packages/people-categories';
 import { sendEmailJobNow } from '@/lib/sales/send-email-job';
 
 const COLLECTION = 'reservas';
@@ -92,6 +93,7 @@ const adminReservaSchema = z.object({
   people: z.number().int().min(1).optional(),
   peopleAdults: z.number().int().min(0).max(50).optional(),
   peopleMinors: z.number().int().min(0).max(50).optional(),
+  peopleBreakdown: z.record(z.string(), z.number().int().min(0).max(50)).optional(),
   depositPercentAdults: z.number().min(0).max(100).optional(),
   depositPercentMinors: z.number().min(0).max(100).optional(),
   allowOverbook: z.boolean().optional(),
@@ -481,12 +483,23 @@ export async function POST(request: Request) {
     const bc = experience.bookingConfig;
     const departureConfig = resolveExperienceDepartureConfig(experience, payload.date);
     const maxPeople = departureConfig.maxPeople;
-    const adults = Math.max(0, Number((payload as any).peopleAdults ?? 0) || 0);
-    const minors = Math.max(0, Number((payload as any).peopleMinors ?? 0) || 0);
-    const derivedPeople = adults + minors;
+    const categories = normalizePeopleCategories(bc?.peopleCategories, maxPeople);
+    const rawBreakdown = (payload as any).peopleBreakdown;
+    const peopleBreakdown = rawBreakdown ? normalizePeopleBreakdown({ breakdown: rawBreakdown, categories }) : null;
+    if (rawBreakdown) {
+      for (const category of categories) {
+        const value = Number(rawBreakdown[category.key]);
+        if (!Number.isInteger(value) || value < category.min || value > category.max) {
+          return NextResponse.json({ error: `Cantidad inválida para ${category.label}.` }, { status: 400 });
+        }
+      }
+    }
+    const adults = peopleBreakdown?.adults ?? Math.max(0, Number((payload as any).peopleAdults ?? 0) || 0);
+    const minors = peopleBreakdown?.minors ?? Math.max(0, Number((payload as any).peopleMinors ?? 0) || 0);
+    const derivedPeople = peopleBreakdown ? getPeopleBreakdownTotal(peopleBreakdown) : adults + minors;
     const people = derivedPeople > 0 ? derivedPeople : Math.max(1, Number((payload as any).people ?? 1) || 1);
-    const peopleAdults = derivedPeople > 0 ? adults : null;
-    const peopleMinors = derivedPeople > 0 ? minors : null;
+    const peopleAdults = peopleBreakdown ? (peopleBreakdown.adults ?? null) : derivedPeople > 0 ? adults : null;
+    const peopleMinors = peopleBreakdown ? (peopleBreakdown.minors ?? null) : derivedPeople > 0 ? minors : null;
     const depositPercentAdults = typeof (payload as any).depositPercentAdults === 'number' ? Number((payload as any).depositPercentAdults) : null;
     const depositPercentMinors = typeof (payload as any).depositPercentMinors === 'number' ? Number((payload as any).depositPercentMinors) : null;
     const allowOverbook = Boolean((payload as any).allowOverbook);
@@ -502,6 +515,7 @@ export async function POST(request: Request) {
       people,
       peopleAdults,
       peopleMinors,
+      peopleBreakdown,
       depositPercentAdults,
       depositPercentMinors,
     });
@@ -512,6 +526,9 @@ export async function POST(request: Request) {
     }
     if (!Number.isFinite(unitAmount) || unitAmount < 1 || computedPricing.subtotalAmount < 1) {
       return NextResponse.json({ error: 'Esta experiencia no tiene configurado un valor de reserva válido.' }, { status: 400 });
+    }
+    if (!computedPricing.hasValidPricing) {
+      return NextResponse.json({ error: 'Falta configurar el precio de todas las categorías para esta salida.' }, { status: 400 });
     }
     const amountTotal = computedPricing.subtotalAmount;
 
@@ -570,10 +587,14 @@ export async function POST(request: Request) {
       people,
       peopleAdults,
       peopleMinors,
+      peopleBreakdown,
       depositPercentAdults,
       depositPercentMinors,
       selectedExtras,
     });
+    if (!repriced.hasValidPricing) {
+      return NextResponse.json({ error: 'Falta configurar el precio de todas las categorías para esta salida.' }, { status: 400 });
+    }
 
     const referredBy = await resolveReservationReferralAssignment({
       experienceId: experience.id,
@@ -708,12 +729,14 @@ export async function POST(request: Request) {
           people,
           peopleAdults,
           peopleMinors,
+          peopleBreakdown,
           seatLayoutId: seatsEnabled ? seatLayoutId : null,
           selectedSeats: seatsEnabled ? (selectedSeats.length ? selectedSeats : null) : null,
           pricingMode: computedPricing.pricingMode,
           pricingBaseUnitAmount: repriced.baseUnitAmount,
           unitAmountAdults: repriced.unitAmountAdults,
           unitAmountMinors: repriced.unitAmountMinors,
+          categoryPriceBreakdown: repriced.categoryPriceBreakdown,
           depositPercentAdults: repriced.depositPercentAdults,
           depositPercentMinors: repriced.depositPercentMinors,
           baseSubtotalAmount: repriced.baseSubtotalAmount,
@@ -744,6 +767,7 @@ export async function POST(request: Request) {
             amountTotal: repriced.subtotalAmount,
             baseSubtotalAmount: repriced.baseSubtotalAmount,
             extrasTotalAmount: repriced.extrasTotalAmount,
+            categoryPriceBreakdown: repriced.categoryPriceBreakdown,
             currency,
             paymentMethod: 'admin',
           }),

@@ -198,7 +198,7 @@ export default async function ExcursionPage({ params }: { params: Promise<{ slug
       const available = await getAvailableForPackageDate(paquete, salida.fecha);
       return {
         date: salida.fecha,
-        available,
+        available: resolved.categoryPricingComplete ? available : 0,
         capacity: resolved.baseCapacity,
       };
     })

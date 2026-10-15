@@ -121,11 +121,7 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
     [maxPeoplePerBooking, paquete.bookingConfig, locale, defaultAdultsLabel, defaultMinorsLabel]
   );
   const specialPrice = Number(paquete.precioDescuentoPrimerosCupos ?? 0);
-  const categoryPrices = (paquete.salidas ?? []).flatMap((salida) =>
-    Object.values(salida.preciosPorCategoria ?? {}).map((amount) => Number(amount)).filter((amount) => Number.isFinite(amount) && amount > 0)
-  );
-  const hasCategoryPricing = categoryPrices.length > 0;
-  const advertisedPrice = hasCategoryPricing ? Math.min(...categoryPrices) : Number(paquete.precio || 0);
+  const advertisedPrice = Number(paquete.precio || 0);
   const specialDeadline = formatPromoDeadline(paquete.tarifaEspecialFechaLimite, locale);
   const specialDeadlineDate = parsePromoDeadline(paquete.tarifaEspecialFechaLimite);
   const [renderedAt] = useState(() => Date.now());
@@ -137,7 +133,6 @@ export default function PaqueteSidebar({ paquete, bookingDates = [] }: PaqueteSi
   );
   const leadTimeNotice = useMemo(() => (minLeadHours > 0 ? buildLeadTimeMessage(minLeadHours, locale) : ''), [minLeadHours, locale]);
   const hasSpecialPrice =
-    !hasCategoryPricing &&
     specialPrice > 0 &&
     paquete.precio > 0 &&
     specialPrice < paquete.precio &&

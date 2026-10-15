@@ -244,7 +244,7 @@ export default function PaqueteCard({
                       })}
                     </p>
                     <p className="font-heading text-xs font-bold text-white md:text-sm">
-                      {primeraSalida.moneda} ${primeraSalida.precio.toLocaleString('es-AR')}
+                      {paquete.moneda || 'ARS'} ${paquete.precio.toLocaleString('es-AR')}
                     </p>
                   </>
                 ) : (

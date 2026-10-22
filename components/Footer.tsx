@@ -65,6 +65,9 @@ export default function Footer() {
               <Link href="/#contacto" className="block transition hover:text-white">
                 Contacto
               </Link>
+              <Link href="/terminos-condiciones" className="block transition hover:text-white">
+                Términos y Condiciones
+              </Link>
             </div>
           </div>
 

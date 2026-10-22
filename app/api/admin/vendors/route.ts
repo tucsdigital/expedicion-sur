@@ -9,6 +9,7 @@ import {
   VENDORS_COLLECTION,
   adminEmails,
   errorMessage,
+  guardAuthenticated,
   guardAdmin,
   isValidDni,
   normalizeDni,
@@ -65,7 +66,7 @@ async function getAuthUserByEmail(auth: Auth, email: string) {
  * - GET /api/admin/vendors?vendorId=<id>  -> { links } del vendedor
  */
 export async function GET(request: Request) {
-  const guard = await guardAdmin(request);
+  const guard = await guardAuthenticated(request);
   if (guard instanceof NextResponse) return guard;
   const { db } = guard;
   const url = new URL(request.url);

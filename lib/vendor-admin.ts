@@ -32,6 +32,25 @@ export function adminEmails(): string[] {
 
 type GuardOk = { auth: Auth; db: Firestore };
 
+/** Verifica Firebase Admin y una sesión Firebase válida, sin exigir email en la allowlist. */
+export async function guardAuthenticated(request: Request): Promise<GuardOk | NextResponse> {
+  if (!adminAuth || !adminDb) {
+    return NextResponse.json(
+      {
+        error:
+          'Firebase Admin no está configurado. Define FIREBASE_SERVICE_ACCOUNT en .env.local con el JSON del Service Account.',
+      },
+      { status: 500 }
+    );
+  }
+  try {
+    await requireAdminToken(request);
+  } catch {
+    return NextResponse.json({ error: 'Autenticación inválida' }, { status: 401 });
+  }
+  return { auth: adminAuth, db: adminDb };
+}
+
 /** Verifica que Firebase Admin esté configurado y que quien llama sea admin. */
 export async function guardAdmin(request: Request): Promise<GuardOk | NextResponse> {
   if (!adminAuth || !adminDb) {

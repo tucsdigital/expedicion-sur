@@ -485,20 +485,34 @@ export default function ReservaDetailPage() {
     } catch { toast.error('No pudimos registrar el movimiento'); } finally { setSavingMovement(false); }
   };
 
-  const enqueue = async (type: 'customer' | 'admin') => {
+  const enqueue = async (type: 'confirmation' | 'voucher' | 'admin') => {
     const token = await authed(); if (!token) return;
     setBusy(true);
     try {
       const res = await fetch('/api/admin/reservas', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reservationId: reserva.id, sendEmailNow: true, ...(type === 'customer' ? { enqueueCustomerVoucherEmail: true } : { enqueueAdminNotificationEmail: true }) }),
+        body: JSON.stringify({
+          reservationId: reserva.id,
+          sendEmailNow: true,
+          ...(type === 'confirmation'
+            ? { enqueueCustomerConfirmationEmail: true }
+            : type === 'voucher'
+              ? { enqueueCustomerVoucherEmail: true }
+              : { enqueueAdminNotificationEmail: true }),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || 'No pudimos enviar el email');
       }
-      toast.success(type === 'customer' ? 'Voucher enviado al cliente' : 'Aviso interno enviado');
+      toast.success(
+        type === 'confirmation'
+          ? 'Confirmación enviada al cliente'
+          : type === 'voucher'
+            ? 'Voucher enviado al cliente'
+            : 'Aviso interno enviado'
+      );
       await load(false);
     } catch (error) { toast.error(error instanceof Error ? error.message : 'No pudimos enviar el email'); await load(false); } finally { setBusy(false); }
   };
@@ -955,18 +969,37 @@ export default function ReservaDetailPage() {
                 </div>
                 <ul className="mt-3 space-y-2.5 text-sm">
                   <li className="flex items-center justify-between gap-2">
-                    <div><p className="font-medium text-slate-700">Confirmación</p><p className="text-xs text-slate-400">{emailLabel(String(venta?.customerConfirmationEmailStatus ?? 'not_sent'))}</p></div>
+                    <div>
+                      <p className="font-medium text-slate-700">Confirmación</p>
+                      <p className="text-xs text-slate-400">{emailLabel(String(venta?.customerConfirmationEmailStatus ?? 'not_sent'))}</p>
+                      {(r as any).emailDelivery?.customerConfirmation?.error && (
+                        <p className="mt-1 max-w-sm text-xs text-red-600">{String((r as any).emailDelivery.customerConfirmation.error)}</p>
+                      )}
+                    </div>
                   </li>
                   <li className="flex items-center justify-between gap-2">
-                    <div><p className="font-medium text-slate-700">Voucher 48 hs</p><p className="text-xs text-slate-400">{voucherLabel(String(venta?.voucherStatus ?? 'not_generated'))}{reserva.voucherSentAt ? ` · ${formatDateTime(reserva.voucherSentAt)}` : reserva.voucherScheduledAt ? ` · prog. ${formatDateTime(reserva.voucherScheduledAt)}` : ''}</p></div>
+                    <div>
+                      <p className="font-medium text-slate-700">Voucher 48 hs</p>
+                      <p className="text-xs text-slate-400">{voucherLabel(String(venta?.voucherStatus ?? 'not_generated'))}{reserva.voucherSentAt ? ` · ${formatDateTime(reserva.voucherSentAt)}` : reserva.voucherScheduledAt ? ` · prog. ${formatDateTime(reserva.voucherScheduledAt)}` : ''}</p>
+                      {(r as any).emailDelivery?.customerVoucher?.error && (
+                        <p className="mt-1 max-w-sm text-xs text-red-600">{String((r as any).emailDelivery.customerVoucher.error)}</p>
+                      )}
+                    </div>
                   </li>
                   <li className="flex items-center justify-between gap-2">
-                    <div><p className="font-medium text-slate-700">Aviso interno</p><p className="text-xs text-slate-400">{emailLabel(String(venta?.adminEmailStatus ?? 'not_sent'))}</p></div>
+                    <div>
+                      <p className="font-medium text-slate-700">Aviso interno</p>
+                      <p className="text-xs text-slate-400">{emailLabel(String(venta?.adminEmailStatus ?? 'not_sent'))}</p>
+                      {(r as any).emailDelivery?.adminNotification?.error && (
+                        <p className="mt-1 max-w-sm text-xs text-red-600">{String((r as any).emailDelivery.adminNotification.error)}</p>
+                      )}
+                    </div>
                   </li>
                 </ul>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => enqueue('customer')}><ReceiptText className="h-4 w-4" />Voucher</Button>
-                  <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => enqueue('admin')}><Mail className="h-4 w-4" />Admin</Button>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button size="sm" variant="outline" className="col-span-2" disabled={busy || !reserva.customerEmail || reserva.status === 'pending' || reserva.status === 'cancelled'} onClick={() => enqueue('confirmation')}><MailCheck className="h-4 w-4" />Reenviar confirmación</Button>
+                  <Button size="sm" variant="outline" className="w-full" disabled={busy || !reserva.customerEmail || reserva.status === 'pending' || reserva.status === 'cancelled'} onClick={() => enqueue('voucher')}><ReceiptText className="h-4 w-4" />Voucher 48 hs</Button>
+                  <Button size="sm" variant="outline" className="w-full" disabled={busy} onClick={() => enqueue('admin')}><Mail className="h-4 w-4" />Aviso interno</Button>
                 </div>
               </Card>
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { resend, getFromEmail, isResendConfigured } from '@/lib/resend';
+import { resend, getEmailJobFrom, isResendConfigured, resendConfigurationError } from '@/lib/resend';
 import { db } from '@/lib/firebase';
 import {
   Timestamp,
@@ -13,7 +13,13 @@ import {
   where,
   updateDoc,
 } from 'firebase/firestore';
-import { buildEmailDeliveryState, emailDeliveryPathForJobType, type VentaEmailJobType } from '@/lib/sales/email-jobs';
+import {
+  buildEmailDeliveryState,
+  emailDeliveryPathForJobType,
+  isEmailJobEligibleForProcessing,
+  type VentaEmailJobType,
+} from '@/lib/sales/email-jobs';
+import { getSalesNotificationEmail } from '@/lib/sales/email-config';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +36,7 @@ type EmailJob = {
   attempts: number;
   lastError: string | null;
   nextAttemptAt: object;
+  updatedAt?: object;
   reservationId?: string;
 };
 
@@ -58,43 +65,36 @@ async function fetchPendingJobs(batchSize: number): Promise<{ id: string; data: 
   try {
     const q = query(
       col,
-      where('status', 'in', ['pending', 'failed']),
+      where('status', 'in', ['pending', 'failed', 'sending']),
       where('nextAttemptAt', '<=', now),
       firestoreOrderBy('nextAttemptAt', 'asc'),
       firestoreLimit(batchSize)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, data: d.data() as EmailJob }));
+    return snap.docs
+      .map((d) => ({ id: d.id, data: d.data() as EmailJob }))
+      .filter(({ data }) => isEmailJobEligibleForProcessing(data, Date.now()));
   } catch {
-    const q2 = query(col, where('status', 'in', ['pending', 'failed']), firestoreLimit(200));
+    const q2 = query(col, where('status', 'in', ['pending', 'failed', 'sending']), firestoreLimit(200));
     const snap = await getDocs(q2);
     const list = snap.docs
       .map((d) => ({ id: d.id, data: d.data() as EmailJob }))
-      .filter(({ data }) => {
-        const toMs = (v: unknown): number => {
-          if (v && typeof v === 'object' && 'toDate' in v && typeof (v as { toDate: () => Date }).toDate === 'function') {
-            return (v as { toDate: () => Date }).toDate().getTime();
-          }
-          if (v && typeof v === 'object' && 'seconds' in v) return ((v as { seconds: number }).seconds ?? 0) * 1000;
-          if (typeof v === 'string') return new Date(v).getTime();
-          return 0;
-        };
-        return toMs(data.nextAttemptAt) <= Date.now();
-      })
-      .sort((a, b) => {
-        const toMs = (v: unknown): number => {
-          if (v && typeof v === 'object' && 'toDate' in v && typeof (v as { toDate: () => Date }).toDate === 'function') {
-            return (v as { toDate: () => Date }).toDate().getTime();
-          }
-          if (v && typeof v === 'object' && 'seconds' in v) return ((v as { seconds: number }).seconds ?? 0) * 1000;
-          if (typeof v === 'string') return new Date(v).getTime();
-          return 0;
-        };
-        return toMs(a.data.nextAttemptAt) - toMs(b.data.nextAttemptAt);
-      })
+      .filter(({ data }) => isEmailJobEligibleForProcessing(data, Date.now()))
+      .sort((a, b) => timestampMillis(a.data.nextAttemptAt) - timestampMillis(b.data.nextAttemptAt))
       .slice(0, batchSize);
     return list;
   }
+}
+
+function timestampMillis(value: unknown): number {
+  if (value && typeof value === 'object') {
+    const timestamp = value as { toMillis?: () => number; toDate?: () => Date; seconds?: number };
+    if (typeof timestamp.toMillis === 'function') return timestamp.toMillis();
+    if (typeof timestamp.toDate === 'function') return timestamp.toDate().getTime();
+    if (typeof timestamp.seconds === 'number') return timestamp.seconds * 1000;
+  }
+  if (typeof value === 'string') return new Date(value).getTime();
+  return 0;
 }
 
 export async function POST(request: Request) {
@@ -111,73 +111,90 @@ async function processEmailQueue(request: Request) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
   if (!isResendConfigured() || !resend) {
-    return NextResponse.json({ error: 'Resend no configurado (falta RESEND_API_KEY)' }, { status: 500 });
+    return NextResponse.json({ error: resendConfigurationError() ?? 'Resend no configurado' }, { status: 500 });
   }
 
   const batchSize = 25;
-  const jobs = await fetchPendingJobs(batchSize);
+  let jobs: { id: string; data: EmailJob }[];
+  try {
+    jobs = await fetchPendingJobs(batchSize);
+  } catch (error) {
+    console.error('[cron/email] No se pudieron consultar los jobs:', error);
+    return NextResponse.json({ error: 'No se pudieron consultar los emails pendientes' }, { status: 500 });
+  }
   if (jobs.length === 0) {
     return NextResponse.json({ ok: true, processed: 0, sent: 0, failed: 0 });
   }
 
   let sent = 0;
   let failed = 0;
+  let lockFailures = 0;
   const processedIds: string[] = [];
 
   for (const job of jobs) {
     const jobRef = doc(db, 'emailJobs', job.id);
-    const locked = await runTransaction(db, async (tx) => {
-      const snap = await tx.get(jobRef);
-      if (!snap.exists()) return false;
-      const data = snap.data() as EmailJob;
-      const status = data.status;
-      if (status !== 'pending' && status !== 'failed') return false;
-      tx.update(jobRef, {
-        status: 'sending',
-        updatedAt: Timestamp.now(),
+    let claimedJob: EmailJob | null;
+    try {
+      claimedJob = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(jobRef);
+        if (!snap.exists()) return null;
+        const data = snap.data() as EmailJob;
+        if (!isEmailJobEligibleForProcessing(data, Date.now())) return null;
+        tx.update(jobRef, {
+          status: 'sending',
+          updatedAt: Timestamp.now(),
+        });
+        return data;
       });
-      return true;
-    }).catch(() => false);
+    } catch (error) {
+      lockFailures += 1;
+      console.error('[cron/email] No se pudo reclamar el job:', { jobId: job.id, error });
+      continue;
+    }
 
-    if (!locked) continue;
+    if (!claimedJob) continue;
 
     processedIds.push(job.id);
-    const from = job.data.from ?? getFromEmail();
+    const from = getEmailJobFrom(claimedJob.from);
+    const to = claimedJob.type === 'admin_aviso'
+      ? getSalesNotificationEmail() || claimedJob.to
+      : claimedJob.to;
 
     try {
-      if (!job.data.to || !job.data.subject || !job.data.html) {
+      if (!to || !claimedJob.subject || !claimedJob.html) {
         throw new Error('Job incompleto (to/subject/html)');
       }
       const { data, error } = await resend.emails.send({
         from,
-        to: job.data.to,
-        subject: job.data.subject,
-        html: job.data.html,
-        text: job.data.text ?? undefined,
-        replyTo: job.data.replyTo ?? undefined,
+        to,
+        subject: claimedJob.subject,
+        html: claimedJob.html,
+        text: claimedJob.text ?? undefined,
+        replyTo: claimedJob.replyTo ?? undefined,
       });
       if (error) {
         throw new Error(typeof error === 'string' ? error : JSON.stringify(error));
       }
       await updateDoc(jobRef, {
         status: 'sent',
-        attempts: (job.data.attempts ?? 0) + 1,
+        attempts: (claimedJob.attempts ?? 0) + 1,
         lastError: null,
         sentAt: Timestamp.now(),
+        providerMessageId: data?.id ?? null,
         updatedAt: Timestamp.now(),
       });
-      if (job.data.reservationId) {
-        const reservationRef = doc(db, 'reservas', job.data.reservationId);
+      if (claimedJob.reservationId) {
+        const reservationRef = doc(db, 'reservas', claimedJob.reservationId);
         const now = Timestamp.now();
         await updateDoc(reservationRef, {
-          [emailDeliveryPathForJobType(job.data.type)]: buildEmailDeliveryState({
+          [emailDeliveryPathForJobType(claimedJob.type)]: buildEmailDeliveryState({
             status: 'sent',
             now,
             jobId: job.id,
             provider: 'resend',
             providerMessageId: data?.id ?? null,
           }),
-          ...(job.data.type === 'cliente_voucher_48hs' || job.data.type === 'cliente_confirmacion'
+          ...(claimedJob.type === 'cliente_voucher_48hs' || claimedJob.type === 'cliente_confirmacion'
             ? { voucherSent: true, voucherSentAt: now }
             : {}),
           updatedAt: now,
@@ -185,7 +202,7 @@ async function processEmailQueue(request: Request) {
       }
       sent += 1;
     } catch (err) {
-      const attempt = (job.data.attempts ?? 0) + 1;
+      const attempt = (claimedJob.attempts ?? 0) + 1;
       const delay = backoffSeconds(attempt);
       const nextAttemptAt = Timestamp.fromDate(new Date(Date.now() + delay * 1000));
       await updateDoc(jobRef, {
@@ -195,11 +212,11 @@ async function processEmailQueue(request: Request) {
         nextAttemptAt,
         updatedAt: Timestamp.now(),
       }).catch(() => null);
-      if (job.data.reservationId) {
-        const reservationRef = doc(db, 'reservas', job.data.reservationId);
+      if (claimedJob.reservationId) {
+        const reservationRef = doc(db, 'reservas', claimedJob.reservationId);
         const now = Timestamp.now();
         await updateDoc(reservationRef, {
-          [emailDeliveryPathForJobType(job.data.type)]: buildEmailDeliveryState({
+          [emailDeliveryPathForJobType(claimedJob.type)]: buildEmailDeliveryState({
             status: 'failed',
             now,
             jobId: job.id,
@@ -214,10 +231,11 @@ async function processEmailQueue(request: Request) {
   }
 
   return NextResponse.json({
-    ok: true,
+    ok: failed === 0 && lockFailures === 0,
     processed: processedIds.length,
     sent,
     failed,
+    lockFailures,
     ids: processedIds,
   });
 }

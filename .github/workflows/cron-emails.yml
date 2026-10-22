@@ -9,11 +9,28 @@ on:
 jobs:
   send-emails:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: cron-emails
+      cancel-in-progress: false
     steps:
       - name: Llamar endpoint de emails pendientes
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          test -n "${{ secrets.APP_URL }}" || (echo "Falta APP_URL" && exit 1)
-          test -n "${{ secrets.CRON_SECRET }}" || (echo "Falta CRON_SECRET" && exit 1)
-          curl --fail-with-body --silent --show-error --retry 2 -X GET "${{ secrets.APP_URL }}/api/cron/email" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json"
+          set -euo pipefail
+          test -n "$APP_URL" || (echo "Falta el secret APP_URL" && exit 1)
+          test -n "$CRON_SECRET" || (echo "Falta el secret CRON_SECRET" && exit 1)
+          APP_URL="${APP_URL%/}"
+          if ! response="$(curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 10 --max-time 180 \
+            -X GET "$APP_URL/api/cron/email" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json")"; then
+            printf '%s\n' "$response"
+            exit 1
+          fi
+          printf '%s\n' "$response"
+          node -e 'const result = JSON.parse(process.argv[1]); if (!result.ok || result.failed > 0 || result.lockFailures > 0) process.exit(1);' "$response"

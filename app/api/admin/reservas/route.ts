@@ -32,7 +32,7 @@ import {
   buildClienteVoucher48hsHtml,
   buildClienteVoucher48hsText,
 } from '@/lib/emails/reserva-confirmada';
-import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
+import { SITE_NAME } from '@/lib/constants';
 import {
   computeExperiencePricing,
   resolveExperienceDepartureConfig,
@@ -41,6 +41,7 @@ import {
 import { buildReservationPricingSnapshot } from '@/lib/sales/orchestrator';
 import { getPeopleBreakdownTotal, normalizePeopleBreakdown, normalizePeopleCategories } from '@/lib/packages/people-categories';
 import { sendEmailJobNow } from '@/lib/sales/send-email-job';
+import { getSalesNotificationEmail } from '@/lib/sales/email-config';
 
 const COLLECTION = 'reservas';
 
@@ -157,6 +158,7 @@ const adminUpdateSchema = z.object({
   referralCode: z.string().max(60).optional(),
   clearReferredBy: z.boolean().optional(),
   enqueueCustomerVoucherEmail: z.boolean().optional(),
+  enqueueCustomerConfirmationEmail: z.boolean().optional(),
   enqueueAdminNotificationEmail: z.boolean().optional(),
   sendEmailNow: z.boolean().optional(),
   addPaymentEvent: paymentMovementSchema.optional(),
@@ -387,10 +389,7 @@ async function enqueueReservationEmailJob(options: {
     : options.type === 'cliente_voucher_48hs'
       ? (reservation as any).emailDelivery?.customerVoucher?.jobId
       : (reservation as any).emailDelivery?.customerConfirmation?.jobId;
-  // Reutilizar el job asociado evita que quede activo el voucher programado
-  // anterior después de un reenvío inmediato.
-  const jobId = options.jobId || String(existingJobId ?? '').trim() || `${options.reservationId}_${options.type}_${Date.now()}`;
-  const emailJobRef = doc(db, 'emailJobs', jobId);
+  const initialJobId = options.jobId || String(existingJobId ?? '').trim() || `${options.reservationId}_${options.type}_${randomUUID()}`;
   const reservationRef = doc(db, COLLECTION, options.reservationId);
   const subject =
     options.type === 'cliente_confirmacion_compra'
@@ -401,7 +400,20 @@ async function enqueueReservationEmailJob(options: {
   const to =
     options.type === 'cliente_confirmacion_compra' || options.type === 'cliente_voucher_48hs'
       ? reservation.customerEmail
-      : CONTACT_INFO.email;
+      : getSalesNotificationEmail();
+  if ((options.type === 'cliente_confirmacion_compra' || options.type === 'cliente_voucher_48hs') && !String(to ?? '').trim()) {
+    throw new Error('La venta no tiene email de cliente.');
+  }
+  if (
+    options.type === 'cliente_confirmacion_compra' &&
+    (reservation.status === 'pending' || reservation.status === 'cancelled') &&
+    !(reservation as any).paidAt
+  ) {
+    throw new Error('No se puede enviar una confirmación de compra hasta confirmar la venta.');
+  }
+  if (options.type === 'admin_aviso' && !String(to ?? '').trim()) {
+    throw new Error('No hay un email interno configurado para los avisos.');
+  }
   const html =
     options.type === 'cliente_confirmacion_compra'
       ? buildClienteCompraConfirmadaHtml(emailData)
@@ -415,31 +427,41 @@ async function enqueueReservationEmailJob(options: {
         ? buildClienteVoucher48hsText(emailData)
       : buildAdminNuevaReservaText(emailData);
 
-  await setDoc(
-    emailJobRef,
-    buildEmailJobDocument({
+  return runTransaction(db, async (tx) => {
+    const [reservationSnap, currentJobSnap] = await Promise.all([
+      tx.get(reservationRef),
+      tx.get(doc(db, 'emailJobs', initialJobId)),
+    ]);
+    if (!reservationSnap.exists()) throw new Error('Venta no encontrada');
+
+    // Never overwrite or duplicate a message already being sent.
+    if (currentJobSnap.exists() && (currentJobSnap.data() as any)?.status === 'sending') {
+      throw new Error('El email ya se está enviando. Esperá antes de volver a intentarlo.');
+    }
+    const jobId = initialJobId;
+    const emailJobRef = doc(db, 'emailJobs', jobId);
+    tx.set(emailJobRef, buildEmailJobDocument({
       type: options.type,
       to,
-      from: getFromEmail(),
+      from: getFromEmail(true),
+      replyTo: process.env.SUPPORT_EMAIL || getFromEmail(false),
       subject,
       html,
       text,
       reservationId: options.reservationId,
       now,
       nextAttemptAt: options.nextAttemptAt || now,
-    })
-  );
-
-  await updateDoc(reservationRef, {
-    [emailDeliveryPathForJobType(options.type)]: buildEmailDeliveryState({
-      status: 'queued',
-      now,
-      jobId,
-    }),
-    updatedAt: now,
-  }).catch(() => null);
-
-  return jobId;
+    }));
+    tx.update(reservationRef, {
+      [emailDeliveryPathForJobType(options.type)]: buildEmailDeliveryState({
+        status: 'queued',
+        now,
+        jobId,
+      }),
+      updatedAt: now,
+    });
+    return jobId;
+  });
 }
 
 export async function POST(request: Request) {
@@ -621,6 +643,59 @@ export async function POST(request: Request) {
     const now = Timestamp.now();
     const status = payload.status ?? 'reserved';
     const reservaRef = doc(collection(db, COLLECTION));
+    const confirmedManualSale = status === 'reserved' || status === 'completed';
+    const manualEmailData = {
+      customerName: payload.customerName,
+      experienceTitle: String(experience.titulo ?? (experience as any).title ?? SITE_NAME),
+      dateFormatted: formatEmailDate(payload.date),
+      peopleLabel: people === 1 ? '1 persona' : `${people} personas`,
+      seatsLabel: selectedSeats.length > 0 ? selectedSeats.join(', ') : undefined,
+      amountFormatted: formatEmailAmount(repriced.subtotalAmount, currency),
+      reservationCode,
+      lookupUrl: String(process.env.NEXT_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '')
+        ? `${String(process.env.NEXT_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '')}/consultar-reserva?code=${encodeURIComponent(reservationCode)}`
+        : undefined,
+      sessionId: reservaRef.id,
+      customerEmail: payload.customerEmail,
+      customerPhone: payload.customerPhone,
+      customerCountry: payload.customerCountry,
+      customerComments: payload.customerComments,
+    };
+    const confirmationJobId = `${reservaRef.id}_cliente_confirm`;
+    const voucherJobId = `${reservaRef.id}_cliente_voucher`;
+    const adminJobId = `${reservaRef.id}_admin`;
+    const confirmationJobRef = doc(db, 'emailJobs', confirmationJobId);
+    const voucherJobRef = doc(db, 'emailJobs', voucherJobId);
+    const adminJobRef = doc(db, 'emailJobs', adminJobId);
+    const nextVoucherAttemptAt = confirmedManualSale && payload.date !== 'sin-fecha'
+      ? computeVoucherNextAttemptAt({ date: payload.date, now })
+      : null;
+    const salesNotificationEmail = getSalesNotificationEmail();
+    const shouldQueueAdminNotice = status !== 'cancelled' && Boolean(salesNotificationEmail);
+    const emailDelivery = buildDefaultEmailDelivery();
+    if (confirmedManualSale) {
+      emailDelivery.customerConfirmation = buildEmailDeliveryState({
+        status: 'queued',
+        now,
+        jobId: confirmationJobId,
+      });
+      if (nextVoucherAttemptAt) {
+        emailDelivery.customerVoucher = buildEmailDeliveryState({
+          status: 'queued',
+          now,
+          jobId: voucherJobId,
+        });
+      }
+    }
+    if (shouldQueueAdminNotice) {
+      emailDelivery.adminNotification = buildEmailDeliveryState({
+        status: 'queued',
+        now,
+        jobId: adminJobId,
+      });
+    }
+    const mailFrom = getFromEmail(true);
+    const mailReplyTo = process.env.SUPPORT_EMAIL || getFromEmail(false);
     const stockRef = payload.date !== 'sin-fecha' ? doc(db, 'stockMovimientos', `admin_${reservaRef.id}`) : null;
     const seatsNeeded = Boolean(seatsEnabled && seatLayoutId && payload.date !== 'sin-fecha');
     const departureId = getSeatDepartureId(experience.id, payload.date);
@@ -794,7 +869,8 @@ export async function POST(request: Request) {
           paidAt: status === 'completed' ? now : null,
           voucherSent: false,
           voucherSentAt: null,
-          emailDelivery: buildDefaultEmailDelivery(),
+          voucherScheduledAt: nextVoucherAttemptAt,
+          emailDelivery,
           createdAt: now,
           updatedAt: now,
           ...(referredBy ? { referredBy } : {}),
@@ -815,6 +891,47 @@ export async function POST(request: Request) {
             },
             { merge: true }
           );
+        }
+
+        if (confirmedManualSale) {
+          tx.set(confirmationJobRef, buildEmailJobDocument({
+            type: 'cliente_confirmacion_compra',
+            to: payload.customerEmail,
+            from: mailFrom,
+            replyTo: mailReplyTo,
+            subject: `Compra confirmada: ${manualEmailData.experienceTitle}`,
+            html: buildClienteCompraConfirmadaHtml(manualEmailData),
+            text: buildClienteCompraConfirmadaText(manualEmailData),
+            reservationId: reservaRef.id,
+            now,
+          }));
+          if (nextVoucherAttemptAt) {
+            tx.set(voucherJobRef, buildEmailJobDocument({
+              type: 'cliente_voucher_48hs',
+              to: payload.customerEmail,
+              from: mailFrom,
+              replyTo: mailReplyTo,
+              subject: `Recordatorio de salida (48 hs): ${manualEmailData.experienceTitle}`,
+              html: buildClienteVoucher48hsHtml(manualEmailData),
+              text: buildClienteVoucher48hsText(manualEmailData),
+              reservationId: reservaRef.id,
+              now,
+              nextAttemptAt: nextVoucherAttemptAt,
+            }));
+          }
+        }
+        if (shouldQueueAdminNotice) {
+          tx.set(adminJobRef, buildEmailJobDocument({
+            type: 'admin_aviso',
+            to: salesNotificationEmail,
+            from: mailFrom,
+            replyTo: mailReplyTo,
+            subject: `Nueva venta: ${manualEmailData.experienceTitle} — ${payload.customerName || payload.customerEmail}`,
+            html: buildAdminNuevaReservaHtml(manualEmailData),
+            text: buildAdminNuevaReservaText(manualEmailData),
+            reservationId: reservaRef.id,
+            now,
+          }));
         }
       });
     } catch (error) {
@@ -1194,6 +1311,50 @@ export async function PATCH(request: Request) {
         createdAt: nowAddon,
         updatedAt: nowAddon,
       });
+    }
+
+    const transitionedToConfirmed =
+      Boolean(payload.status && payload.status !== reservation.status) &&
+      (payload.status === 'reserved' || payload.status === 'completed');
+    const previousEmailDelivery = (reservation as any).emailDelivery ?? {};
+    if (transitionedToConfirmed && !payload.enqueueCustomerConfirmationEmail && !previousEmailDelivery.customerConfirmation?.jobId && String((reservation as any).customerEmail ?? '').trim()) {
+      await enqueueReservationEmailJob({
+        reservationId: payload.reservationId,
+        type: 'cliente_confirmacion_compra',
+      });
+    }
+    if (
+      transitionedToConfirmed &&
+      !payload.enqueueCustomerVoucherEmail &&
+      !previousEmailDelivery.customerVoucher?.jobId &&
+      !reservation.voucherSent &&
+      String((reservation as any).customerEmail ?? '').trim() &&
+      (payload.date ?? reservation.date) !== 'sin-fecha'
+    ) {
+      const now = Timestamp.now();
+      const nextAttemptAt = computeVoucherNextAttemptAt({ date: payload.date ?? reservation.date, now });
+      await enqueueReservationEmailJob({
+        reservationId: payload.reservationId,
+        type: 'cliente_voucher_48hs',
+        nextAttemptAt,
+      });
+      await updateDoc(doc(db, COLLECTION, payload.reservationId), {
+        voucherScheduledAt: nextAttemptAt,
+        voucherSent: false,
+        voucherSentAt: null,
+        updatedAt: now,
+      }).catch(() => null);
+    }
+
+    if (payload.enqueueCustomerConfirmationEmail) {
+      const jobId = await enqueueReservationEmailJob({
+        reservationId: payload.reservationId,
+        type: 'cliente_confirmacion_compra',
+      });
+      if (payload.sendEmailNow) {
+        const result = await sendEmailJobNow(jobId);
+        if (!result.ok) throw new Error(result.error);
+      }
     }
 
     if (payload.enqueueCustomerVoucherEmail) {

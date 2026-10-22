@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getPayment, isPaymentApproved, isPaymentRejected, mapPaymentStatusToReservationStatus } from '@/lib/mercadopago';
 import { getFromEmail, isResendConfigured, resend } from '@/lib/resend';
 import { getExperienciaById } from '@/lib/experiencias-catalog';
-import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
+import { SITE_NAME } from '@/lib/constants';
+import { getSalesNotificationEmail } from '@/lib/sales/email-config';
 import {
   buildClienteCompraConfirmadaHtml,
   buildClienteCompraConfirmadaText,
@@ -1020,12 +1021,13 @@ export async function POST(request: Request) {
                 });
               }
 
-              if (!emailAdminSnap.exists() && CONTACT_INFO.email && isApproved) {
+              const salesNotificationEmail = getSalesNotificationEmail();
+              if (!emailAdminSnap.exists() && salesNotificationEmail && isApproved) {
                 const adminSendId = sendResults.admin[reservationId] ?? null;
                 queueSet(emailAdminRef, {
                   type: 'admin_aviso',
                   status: adminSendId ? 'sent' : 'pending',
-                  to: CONTACT_INFO.email,
+                  to: salesNotificationEmail,
                   from,
                   replyTo,
                   subject: `Nueva reserva: ${finalPackageTitle || 'Experiencia'} — ${customerName || customerEmail}`,
@@ -1748,11 +1750,12 @@ export async function POST(request: Request) {
         }
 
         // Email al admin (solo si aprobado)
-        if (!emailAdminSnap.exists() && CONTACT_INFO.email && isApproved) {
+        const salesNotificationEmail = getSalesNotificationEmail();
+        if (!emailAdminSnap.exists() && salesNotificationEmail && isApproved) {
           tx.set(emailAdminRef, {
             type: 'admin_aviso',
             status: directSend.admin ? 'sent' : 'pending',
-            to: CONTACT_INFO.email,
+            to: salesNotificationEmail,
             from,
             replyTo,
             subject: `Nueva reserva: ${finalPackageTitle || 'Experiencia'} — ${customerName || customerEmail}`,

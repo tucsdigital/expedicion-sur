@@ -10,7 +10,8 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { getExperienciaById } from '@/lib/experiencias-catalog';
-import { CONTACT_INFO, SITE_NAME } from '@/lib/constants';
+import { SITE_NAME } from '@/lib/constants';
+import { getSalesNotificationEmail } from '@/lib/sales/email-config';
 import {
   buildAdminNuevaReservaHtml,
   buildAdminNuevaReservaText,
@@ -598,11 +599,12 @@ export async function POST(request: Request) {
           updatedAt: now,
         });
       }
-      if (!emailAdminSnap.exists() && CONTACT_INFO.email) {
+      const salesNotificationEmail = getSalesNotificationEmail();
+      if (!emailAdminSnap.exists() && salesNotificationEmail) {
         tx.set(emailAdminRef, {
           type: 'admin_aviso',
           status: adminSendId ? 'sent' : 'pending',
-          to: CONTACT_INFO.email,
+          to: salesNotificationEmail,
           from,
           replyTo,
             subject: `Nueva reserva: ${finalExperienceTitle || 'Experiencia'} — ${customerName || customerEmail}`,

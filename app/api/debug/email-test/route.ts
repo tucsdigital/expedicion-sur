@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { resend, getFromEmail, isResendConfigured } from '@/lib/resend';
+import { resend, getFromEmail, isResendConfigured, resendConfigurationError } from '@/lib/resend';
 import { SITE_NAME } from '@/lib/constants';
 
 export const runtime = 'nodejs';
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
   if (!isResendConfigured() || !resend) {
-    return NextResponse.json({ error: 'Resend no configurado (falta RESEND_API_KEY)' }, { status: 500 });
+    return NextResponse.json({ error: resendConfigurationError() ?? 'Resend no configurado' }, { status: 500 });
   }
 
   const url = new URL(request.url);
